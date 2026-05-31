@@ -140,6 +140,134 @@ const playSound = (type: 'stone' | 'capture' | 'extraTurn' | 'gameOver' | 'tick'
   }
 };
 
+function getSmartMinimaxMove(board: number[], depth: number = 7): number {
+  const validPits: number[] = [];
+  for (let idx = 7; idx <= 12; idx++) {
+    if (board[idx] > 0) validPits.push(idx);
+  }
+
+  if (validPits.length === 0) return -1;
+  if (validPits.length === 1) return validPits[0];
+
+  let bestMove = -1;
+  let bestScore = -Infinity;
+
+  for (const pit of validPits) {
+    const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
+    let score: number;
+    if (nextTurn === 'player2') {
+      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, true);
+    } else {
+      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, false);
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMove = pit;
+    }
+  }
+
+  return bestMove === -1 ? validPits[0] : bestMove;
+}
+
+function runMinimax(
+  board: number[],
+  depth: number,
+  alpha: number,
+  beta: number,
+  isMaximizing: boolean
+): number {
+  const isP1Empty = board.slice(0, 6).every(val => val === 0);
+  const isP2Empty = board.slice(7, 13).every(val => val === 0);
+
+  if (isP1Empty || isP2Empty || depth === 0) {
+    const finalBoard = [...board];
+    if (isP1Empty) {
+      let rem = 0;
+      for (let i = 7; i <= 12; i++) {
+        rem += finalBoard[i];
+        finalBoard[i] = 0;
+      }
+      finalBoard[6] += rem;
+    } else if (isP2Empty) {
+      let rem = 0;
+      for (let i = 0; i < 6; i++) {
+        rem += finalBoard[i];
+        finalBoard[i] = 0;
+      }
+      finalBoard[13] += rem;
+    }
+    const storeDiff = finalBoard[13] - finalBoard[6];
+    let pitSumDiff = 0;
+    for (let i = 7; i <= 12; i++) pitSumDiff += finalBoard[i];
+    for (let i = 0; i < 6; i++) pitSumDiff -= finalBoard[i];
+
+    return storeDiff * 10 + pitSumDiff * 0.5;
+  }
+
+  if (isMaximizing) {
+    let maxEval = -Infinity;
+    const validPits: number[] = [];
+    for (let i = 7; i <= 12; i++) {
+      if (board[i] > 0) validPits.push(i);
+    }
+
+    validPits.sort((a, b) => {
+      const landsInStoreA = (a + board[a]) % 13 === 0;
+      const landsInStoreB = (b + board[b]) % 13 === 0;
+      if (landsInStoreA && !landsInStoreB) return -1;
+      if (!landsInStoreA && landsInStoreB) return 1;
+      return b - a;
+    });
+
+    for (const pit of validPits) {
+      const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
+      let score: number;
+      if (nextTurn === 'player2') {
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, true);
+      } else {
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, false);
+      }
+      maxEval = Math.max(maxEval, score);
+      alpha = Math.max(alpha, score);
+      if (beta <= alpha) {
+        break;
+      }
+    }
+    return maxEval;
+  } else {
+    let minEval = Infinity;
+    const validPits: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      if (board[i] > 0) validPits.push(i);
+    }
+
+    validPits.sort((a, b) => {
+      const landsInStoreA = (a + board[a]) % 6 === 0;
+      const landsInStoreB = (b + board[b]) % 6 === 0;
+      if (landsInStoreA && !landsInStoreB) return -1;
+      if (!landsInStoreA && landsInStoreB) return 1;
+      return a - b;
+    });
+
+    for (const pit of validPits) {
+      const { nextBoard, nextTurn } = executeMove(board, pit, 'player1');
+      let score: number;
+      if (nextTurn === 'player1') {
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, false);
+      } else {
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, true);
+      }
+      minEval = Math.min(minEval, score);
+      beta = Math.min(beta, score);
+      if (beta <= alpha) {
+        break;
+      }
+    }
+    return minEval;
+  }
+}
+
 interface GameBoardProps {
   roomId: string;
   gameMode: 'multiplayer' | 'singleplayer';
@@ -519,81 +647,7 @@ export default function GameBoard({
       }
 
       const board = offlineRoom.board;
-      const validPits: number[] = [];
-      for (let idx = 7; idx <= 12; idx++) {
-        if (board[idx] > 0) validPits.push(idx);
-      }
-
-      if (validPits.length === 0) {
-        botThinkingRef.current = false;
-        setBotIsThinking(false);
-        return;
-      }
-
-      let chosenPit = -1;
-
-      // Bot Decider Heuristics
-      for (const pit of validPits) {
-        const seeds = board[pit];
-        let current = pit;
-        if (seeds === 1) {
-          current = getNextIndex(current, 'player2');
-        } else {
-          let remaining = seeds - 1;
-          while (remaining > 0) {
-            current = getNextIndex(current, 'player2');
-            remaining--;
-          }
-        }
-        if (current === 13) {
-          chosenPit = pit;
-          break;
-        }
-      }
-
-      if (chosenPit === -1) {
-        for (const pit of validPits) {
-          const seeds = board[pit];
-          const testBoard = [...board];
-          testBoard[pit] = 0;
-          
-          let current = pit;
-          if (seeds === 1) {
-            current = getNextIndex(current, 'player2');
-            testBoard[current] += 1;
-          } else {
-            testBoard[pit] = 1;
-            let remaining = seeds - 1;
-            while (remaining > 0) {
-              current = getNextIndex(current, 'player2');
-              testBoard[current] += 1;
-              remaining--;
-            }
-          }
-
-          if (current >= 0 && current <= 5 && testBoard[current] % 2 === 0) {
-            chosenPit = pit;
-            break;
-          }
-          if (current >= 7 && current <= 12 && testBoard[current] === 1) {
-            const opposite = 12 - current;
-            if (testBoard[opposite] > 0) {
-              chosenPit = pit;
-              break;
-            }
-          }
-        }
-      }
-
-      if (chosenPit === -1) {
-        let maxStones = -1;
-        for (const pit of validPits) {
-          if (board[pit] > maxStones) {
-            maxStones = board[pit];
-            chosenPit = pit;
-          }
-        }
-      }
+      const chosenPit = getSmartMinimaxMove(board, 7); // Grandmaster level depth 7
 
       if (chosenPit !== -1) {
         const { nextBoard, nextTurn, message } = executeMove(
@@ -650,6 +704,23 @@ export default function GameBoard({
   const isP1 = role === 'player1';
   const isP2 = role === 'player2';
   const isMyTurn = activeRoom?.status === 'playing' && activeRoom?.turn === role;
+
+  // Perspective-based layout mapping so the active viewer is always at the bottom
+  const leftStoreIndex = isP2 ? 6 : 13;
+  const rightStoreIndex = isP2 ? 13 : 6;
+  const topRowIndices = isP2 ? [5, 4, 3, 2, 1, 0] : [12, 11, 10, 9, 8, 7];
+  const bottomRowIndices = isP2 ? [7, 8, 9, 10, 11, 12] : [0, 1, 2, 3, 4, 5];
+
+  const topPlayerName = isP2 ? activeRoom?.player1Name : activeRoom?.player2Name;
+  const topPlayerLabel = isP2 ? 'P1' : 'P2';
+  const topPlayerColor = isP2 ? 'text-amber-500' : 'text-indigo-400';
+  const topPlayerIsBot = !isP2 && gameMode === 'singleplayer';
+  const topPlayerActive = activeRoom?.status === 'playing' && activeRoom?.turn === (isP2 ? 'player1' : 'player2');
+
+  const bottomPlayerName = isP2 ? activeRoom?.player2Name : activeRoom?.player1Name;
+  const bottomPlayerLabel = isP2 ? 'P2' : 'P1';
+  const bottomPlayerColor = isP2 ? 'text-indigo-400' : 'text-amber-500';
+  const bottomPlayerActive = activeRoom?.status === 'playing' && activeRoom?.turn === (isP2 ? 'player2' : 'player1');
 
   // Reset timer on turn / board changes
   useEffect(() => {
@@ -1007,23 +1078,23 @@ export default function GameBoard({
             </div>
           </div>
 
-          {/* Opponent player info (P2 - Visual Top Row) */}
+          {/* Opponent / Top player info (Visual Top Row) */}
           <div className="flex justify-between items-center px-4">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-indigo-400 tracking-wider font-mono">P2</span>
+              <span className={`text-xs font-bold ${topPlayerColor} tracking-wider font-mono`}>{topPlayerLabel}</span>
               <h4 className="text-md font-bold text-slate-200">
-                {activeRoom.player2Name}
+                {topPlayerName}
               </h4>
-              {gameMode === 'singleplayer' && (
+              {topPlayerIsBot && (
                 <span className="px-2 py-0.5 bg-indigo-950 text-indigo-400 border border-indigo-850 font-semibold rounded text-[10px] uppercase font-mono">
                   BOT
                 </span>
               )}
             </div>
-            {activeRoom.status === 'playing' && activeRoom.turn === 'player2' && (
-              <span className="text-xs text-amber-400 flex items-center gap-2 animate-pulse bg-amber-950/20 border border-amber-900/40 px-3 py-1 rounded-lg">
+            {topPlayerActive && (
+              <span className={`text-xs ${topPlayerColor} flex items-center gap-2 animate-pulse bg-slate-900/40 border border-slate-800 px-3 py-1 rounded-lg`}>
                 <Flame className="w-3.5 h-3.5" />
-                {botIsThinking ? 'Bilge Bot düşünüyor...' : 'Hamle Yapıyor...'}
+                {topPlayerIsBot ? (botIsThinking ? 'Bilge Bot düşünüyor...' : 'Hamle Yapıyor...') : 'Hamle Yapıyor...'}
               </span>
             )}
           </div>
@@ -1036,41 +1107,43 @@ export default function GameBoard({
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute bottom-3 left-3 border border-zinc-950 opacity-40 shadow" />
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute bottom-3 right-3 border border-zinc-950 opacity-40 shadow" />
 
-            {/* LAYOUT: Player 2 Store (Hazine) - index 13 */}
-            {/* Visual LEFT end for Player 1 perspective */}
+            {/* LAYOUT: Dynamic Left Store (index leftStoreIndex) */}
             <div className={`flex flex-col w-10 xs:w-14 sm:w-20 md:w-36 h-36 xs:h-44 sm:h-56 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl p-1 xs:p-2 md:p-3 items-center justify-between text-center relative border gap-1 xs:gap-2 transition-all duration-300 ${
-              animatingPit === 13 
-                ? 'border-indigo-400 ring-4 ring-indigo-500/50 bg-[#542406] scale-102 z-10' 
+              animatingPit === leftStoreIndex 
+                ? `${leftStoreIndex === 13 ? 'border-indigo-400 ring-4 ring-indigo-500/50' : 'border-amber-400 ring-4 ring-amber-500/50'} bg-[#542406] scale-102 z-10` 
                 : 'border-amber-950/40'
             }`}>
-              {animatingPit === 13 && (
-                <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
+              {animatingPit === leftStoreIndex && (
+                <span className={`absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 ${leftStoreIndex === 13 ? 'border-indigo-400' : 'border-amber-400'} animate-ping opacity-75 pointer-events-none`} />
               )}
-              <span className="text-[7px] xs:text-[8px] sm:text-[9px] md:text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono text-center shrink-0 leading-none">
-                <span className="hidden sm:inline">{activeRoom.player2Name}'in Haznesi</span>
-                <span className="sm:hidden">P2</span>
+              <span className={`text-[7px] xs:text-[8px] sm:text-[9px] md:text-[10px] font-bold ${leftStoreIndex === 13 ? 'text-indigo-400' : 'text-amber-500'} uppercase tracking-widest font-mono text-center shrink-0 leading-none`}>
+                <span className="hidden sm:inline">{leftStoreIndex === 13 ? activeRoom.player2Name : activeRoom.player1Name}'in Haznesi</span>
+                <span className="sm:hidden">{leftStoreIndex === 13 ? 'P2' : 'P1'}</span>
               </span>
               
               {/* Stones area */}
               <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[16px] xs:min-h-[24px]">
                 <div className="absolute inset-0 flex items-center justify-center scale-[0.45] xs:scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
-                  {renderStones(displayBoard ? displayBoard[13] : activeRoom.board[13])}
+                  {renderStones(displayBoard ? displayBoard[leftStoreIndex] : activeRoom.board[leftStoreIndex])}
                 </div>
               </div>
-
-              <div className="font-mono text-xs xs:text-sm sm:text-2xl md:text-3xl font-extrabold text-indigo-400 drop-shadow shadow-indigo-950 pb-0.5 px-0.5 shrink-0">
-                {displayBoard ? displayBoard[13] : activeRoom.board[13]}
+ 
+              <div className={`font-mono text-xs xs:text-sm sm:text-2xl md:text-3xl font-extrabold ${leftStoreIndex === 13 ? 'text-indigo-400 drop-shadow shadow-indigo-950' : 'text-amber-500 drop-shadow shadow-amber-950'} pb-0.5 px-0.5 shrink-0`}>
+                {displayBoard ? displayBoard[leftStoreIndex] : activeRoom.board[leftStoreIndex]}
               </div>
             </div>
-
+ 
             {/* Pits Matrix Column */}
             <div className="flex-1 flex flex-col justify-between gap-1.5 xs:gap-2 sm:gap-4 md:gap-6">
               
-              {/* TOP ROW: Player 2 pits (Indices: 12, 11, 10, 9, 8, 7) */}
+              {/* TOP ROW: Dyamic Pits based on topRowIndices */}
               <div className="grid grid-cols-6 gap-1 xs:gap-1.5 sm:gap-3 md:gap-4">
-                {[12, 11, 10, 9, 8, 7].map((idx) => {
+                {topRowIndices.map((idx) => {
                   const seeds = displayBoard ? displayBoard[idx] : activeRoom.board[idx];
-                  const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 && isP2 && !isSowing;
+                  const isP1Pit = idx >= 0 && idx <= 5;
+                  const playableTurn = activeRoom.status === 'playing' && activeRoom.turn === (isP1Pit ? 'player1' : 'player2');
+                  const clickable = playableTurn && seeds > 0 && (isP1Pit ? isP1 : isP2) && !isSowing;
+                  const textColorClass = isP1Pit ? 'text-amber-500' : 'text-indigo-400';
                   
                   return (
                     <button
@@ -1079,45 +1152,48 @@ export default function GameBoard({
                       disabled={!clickable}
                       className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1 sm:p-2 relative transition-all duration-300 border ${
                         idx === animatingPit
-                          ? 'border-indigo-400 ring-4 ring-indigo-500/50 bg-[#5e2604] scale-105 z-10'
+                          ? `${isP1Pit ? 'border-amber-400 ring-4 ring-amber-500/50' : 'border-indigo-400 ring-4 ring-indigo-500/50'} bg-[#5e2604] scale-105 z-10`
                           : 'border-amber-950/20'
                       } ${
                         clickable 
-                          ? 'hover:bg-[#5a2504] cursor-pointer hover:ring-2 hover:ring-indigo-500/40' 
+                          ? `hover:bg-[#5a2504] cursor-pointer hover:ring-2 ${isP1Pit ? 'hover:ring-amber-500' : 'hover:ring-indigo-500/40'}` 
                           : 'cursor-not-allowed opacity-90'
                       } ${
-                        activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 && !isSowing
-                          ? 'ring-1 ring-indigo-500/30' 
+                        playableTurn && seeds > 0 && !isSowing
+                          ? `ring-1 ${isP1Pit ? 'ring-amber-500/30' : 'ring-indigo-500/30'}` 
                           : ''
                       }`}
                     >
                       {idx === animatingPit && (
-                        <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
+                        <span className={`absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 ${isP1Pit ? 'border-amber-400' : 'border-indigo-400'} animate-ping opacity-75 pointer-events-none`} />
                       )}
-                      <span className="text-[7px] xs:text-[8px] sm:text-[9px] font-bold font-mono text-indigo-400 absolute top-0.5 xs:top-1 left-0.5 xs:left-1.5">
-                        {13 - idx}
+                      <span className={`text-[7px] xs:text-[8px] sm:text-[9px] font-bold font-mono ${textColorClass} absolute top-0.5 xs:top-1 left-0.5 xs:left-1.5`}>
+                        {isP1Pit ? idx + 1 : 13 - idx}
                       </span>
-
+ 
                       {/* Stones Container */}
                       <div className="flex-1 w-full relative overflow-hidden mt-0.5 xs:mt-1">
                         <div className="absolute inset-0 flex items-center justify-center scale-[0.4] xs:scale-65 sm:scale-95 md:scale-100 transform origin-center transition-transform">
                           {renderStones(seeds)}
                         </div>
                       </div>
-
-                      <span className="font-mono text-xxs xs:text-xs sm:text-md md:text-xl font-bold text-indigo-400 pb-0.5 sm:pb-1 pt-0.5 md:pt-0">
+ 
+                      <span className={`font-mono text-xxs xs:text-xs sm:text-md md:text-xl font-bold ${textColorClass} pb-0.5 sm:pb-1 pt-0.5 md:pt-0`}>
                         {seeds}
                       </span>
                     </button>
                   );
                 })}
               </div>
-
-              {/* BOTTOM ROW: Player 1 pits (Indices: 0, 1, 2, 3, 4, 5) */}
+ 
+              {/* BOTTOM ROW: Dynamic Pits based on bottomRowIndices */}
               <div className="grid grid-cols-6 gap-1 xs:gap-1.5 sm:gap-3 md:gap-4">
-                {[0, 1, 2, 3, 4, 5].map((idx) => {
+                {bottomRowIndices.map((idx) => {
                   const seeds = displayBoard ? displayBoard[idx] : activeRoom.board[idx];
-                  const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player1' && seeds > 0 && isP1 && !isSowing;
+                  const isP1Pit = idx >= 0 && idx <= 5;
+                  const playableTurn = activeRoom.status === 'playing' && activeRoom.turn === (isP1Pit ? 'player1' : 'player2');
+                  const clickable = playableTurn && seeds > 0 && (isP1Pit ? isP1 : isP2) && !isSowing;
+                  const textColorClass = isP1Pit ? 'text-amber-500' : 'text-indigo-400';
                   
                   return (
                     <button
@@ -1126,29 +1202,33 @@ export default function GameBoard({
                       disabled={!clickable}
                       className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1 sm:p-2 relative transition-all duration-300 border ${
                         idx === animatingPit
-                          ? 'border-amber-400 ring-4 ring-amber-500/50 bg-[#5e2604] scale-105 z-10'
+                          ? `${isP1Pit ? 'border-amber-400 ring-4 ring-amber-500/50' : 'border-indigo-400 ring-4 ring-indigo-500/50'} bg-[#5e2604] scale-105 z-10`
                           : 'border-amber-950/20'
                       } ${
                         clickable 
-                          ? 'hover:bg-[#5a2504] cursor-pointer ring-1 ring-amber-500/40 hover:ring-2 hover:ring-amber-500 active-turn-glow' 
+                          ? `hover:bg-[#5a2504] cursor-pointer hover:ring-2 ${isP1Pit ? 'hover:ring-amber-500 active-turn-glow' : 'hover:ring-indigo-500/40'}` 
                           : 'cursor-not-allowed opacity-90'
+                      } ${
+                        playableTurn && seeds > 0 && !isSowing
+                          ? `ring-1 ${isP1Pit ? 'ring-amber-500/30' : 'ring-indigo-500/30'}` 
+                          : ''
                       }`}
                     >
                       {idx === animatingPit && (
-                        <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
+                        <span className={`absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 ${isP1Pit ? 'border-amber-400' : 'border-indigo-400'} animate-ping opacity-75 pointer-events-none`} />
                       )}
-                      <span className="text-[7px] xs:text-[8px] sm:text-[9px] font-bold font-mono text-amber-500 absolute top-0.5 xs:top-1 left-0.5 xs:left-1.5">
-                        {idx + 1}
+                      <span className={`text-[7px] xs:text-[8px] sm:text-[9px] font-bold font-mono ${textColorClass} absolute top-0.5 xs:top-1 left-0.5 xs:left-1.5`}>
+                        {isP1Pit ? idx + 1 : 13 - idx}
                       </span>
-
+ 
                       {/* Stones Container */}
                       <div className="flex-1 w-full relative overflow-hidden mt-0.5 xs:mt-1">
                         <div className="absolute inset-0 flex items-center justify-center scale-[0.4] xs:scale-65 sm:scale-95 md:scale-100 transform origin-center transition-transform">
                           {renderStones(seeds)}
                         </div>
                       </div>
-
-                      <span className="font-mono text-xxs xs:text-xs sm:text-md md:text-xl font-bold text-amber-500 pb-0.5 sm:pb-1 pt-0.5 md:pt-0">
+ 
+                      <span className={`font-mono text-xxs xs:text-xs sm:text-md md:text-xl font-bold ${textColorClass} pb-0.5 sm:pb-1 pt-0.5 md:pt-0`}>
                         {seeds}
                       </span>
                     </button>
@@ -1156,47 +1236,46 @@ export default function GameBoard({
                 })}
               </div>
             </div>
-
-            {/* LAYOUT: Player 1 Store (Hazine) - index 6 */}
-            {/* Visual RIGHT end for Player 1 perspective */}
+ 
+            {/* LAYOUT: Dynamic Right Store (index rightStoreIndex) */}
             <div className={`flex flex-col w-10 xs:w-14 sm:w-20 md:w-36 h-36 xs:h-44 sm:h-56 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl p-1 xs:p-2 md:p-3 items-center justify-between text-center relative border gap-1 xs:gap-2 transition-all duration-300 ${
-              animatingPit === 6 
-                ? 'border-amber-400 ring-4 ring-amber-500/50 bg-[#542406] scale-102 z-10' 
+              animatingPit === rightStoreIndex 
+                ? `${rightStoreIndex === 13 ? 'border-indigo-400 ring-4 ring-indigo-500/50' : 'border-amber-400 ring-4 ring-amber-500/50'} bg-[#542406] scale-102 z-10` 
                 : 'border-amber-950/40'
             }`}>
-              {animatingPit === 6 && (
-                <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
+              {animatingPit === rightStoreIndex && (
+                <span className={`absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 ${rightStoreIndex === 13 ? 'border-indigo-400' : 'border-amber-400'} animate-ping opacity-75 pointer-events-none`} />
               )}
-              <span className="text-[7px] xs:text-[8px] sm:text-[9px] md:text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono text-center shrink-0 leading-none">
-                <span className="hidden sm:inline">{activeRoom.player1Name}'in Haznesi</span>
-                <span className="sm:hidden">P1</span>
+              <span className={`text-[7px] xs:text-[8px] sm:text-[9px] md:text-[10px] font-bold ${rightStoreIndex === 13 ? 'text-indigo-400' : 'text-amber-500'} uppercase tracking-widest font-mono text-center shrink-0 leading-none`}>
+                <span className="hidden sm:inline">{rightStoreIndex === 13 ? activeRoom.player2Name : activeRoom.player1Name}'in Haznesi</span>
+                <span className="sm:hidden">{rightStoreIndex === 13 ? 'P2' : 'P1'}</span>
               </span>
               
               {/* Stones area */}
               <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[16px] xs:min-h-[24px]">
                 <div className="absolute inset-0 flex items-center justify-center scale-[0.45] xs:scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
-                  {renderStones(displayBoard ? displayBoard[6] : activeRoom.board[6])}
+                  {renderStones(displayBoard ? displayBoard[rightStoreIndex] : activeRoom.board[rightStoreIndex])}
                 </div>
               </div>
-
-              <div className="font-mono text-xs xs:text-sm sm:text-2xl md:text-3xl font-extrabold text-amber-500 drop-shadow shadow-amber-950 pb-0.5 px-0.5 shrink-0">
-                {displayBoard ? displayBoard[6] : activeRoom.board[6]}
+ 
+              <div className={`font-mono text-xs xs:text-sm sm:text-2xl md:text-3xl font-extrabold ${rightStoreIndex === 13 ? 'text-indigo-400 drop-shadow shadow-indigo-950' : 'text-amber-500 drop-shadow shadow-amber-950'} pb-0.5 px-0.5 shrink-0`}>
+                {displayBoard ? displayBoard[rightStoreIndex] : activeRoom.board[rightStoreIndex]}
               </div>
             </div>
-
+ 
           </div>
-
-          {/* Bottom player info (P1 - Visual Bottom Row) */}
+ 
+          {/* Bottom player info (Visual Bottom Row) */}
           <div className="flex justify-between items-center px-4 bg-slate-900/40 border border-slate-750/30 p-2.5 rounded-xl">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-amber-500 tracking-wider font-mono">P1</span>
+              <span className={`text-xs font-bold ${bottomPlayerColor} tracking-wider font-mono`}>{bottomPlayerLabel}</span>
               <h4 className="text-md font-bold text-slate-200">
-                {activeRoom.player1Name} (Siz)
+                {bottomPlayerName} {!isSpectator && '(Siz)'}
               </h4>
             </div>
-            {activeRoom.status === 'playing' && activeRoom.turn === 'player1' && (
-              <span className="text-xs text-amber-400 flex items-center gap-2 animate-pulse bg-amber-950/20 border border-amber-900/40 px-3 py-1 rounded-lg font-semibold">
-                <Flame className="w-3.5 h-3.5 text-amber-500" />
+            {bottomPlayerActive && (
+              <span className={`text-xs ${bottomPlayerColor} flex items-center gap-2 animate-pulse bg-slate-900/40 border border-slate-850 px-3 py-1 rounded-lg font-semibold`}>
+                <Flame className="w-3.5 h-3.5" />
                 Hamle Yapmanız Bekleniyor...
               </span>
             )}
