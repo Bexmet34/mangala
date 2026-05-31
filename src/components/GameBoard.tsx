@@ -141,7 +141,112 @@ const playSound = (type: 'stone' | 'capture' | 'extraTurn' | 'gameOver' | 'tick'
   }
 };
 
-function getSmartMinimaxMove(board: number[], depth: number = 7): number {
+function evaluateBoardState(board: number[], isUnbeatable: boolean): number {
+  const isP1Empty = board.slice(0, 6).every(val => val === 0);
+  const isP2Empty = board.slice(7, 13).every(val => val === 0);
+
+  const finalBoard = [...board];
+  if (isP1Empty) {
+    let rem = 0;
+    for (let i = 7; i <= 12; i++) {
+      rem += finalBoard[i];
+      finalBoard[i] = 0;
+    }
+    finalBoard[6] += rem;
+  } else if (isP2Empty) {
+    let rem = 0;
+    for (let i = 0; i < 6; i++) {
+      rem += finalBoard[i];
+      finalBoard[i] = 0;
+    }
+    finalBoard[13] += rem;
+  }
+
+  const botStore = finalBoard[13];
+  const humanStore = finalBoard[6];
+  const storeDiff = botStore - humanStore;
+
+  // Store difference is weighted extremely high
+  let baseEval = storeDiff * 1000;
+
+  if (!isUnbeatable) {
+    // Basic heuristics for simple/medium/hard
+    let pitSumDiff = 0;
+    for (let i = 7; i <= 12; i++) pitSumDiff += finalBoard[i];
+    for (let i = 0; i < 6; i++) pitSumDiff -= finalBoard[i];
+    return baseEval + pitSumDiff * 10;
+  }
+
+  // Ultra-advanced heuristics for Zor+ (Yenilmez/Unbeatable AI)
+  // Heuristic 1: Extra turn potential for bot (last seed landing in store 13)
+  let extraTurnsBot = 0;
+  for (let i = 7; i <= 12; i++) {
+    const seeds = board[i];
+    if (seeds > 0) {
+      const stepsToStore = 13 - i;
+      // Landing in store gives extra turn
+      if (seeds === stepsToStore || (seeds > 13 && (seeds - stepsToStore) % 13 === 0)) {
+        extraTurnsBot += 1;
+      }
+    }
+  }
+  baseEval += extraTurnsBot * 150;
+
+  // Heuristic 2: Human extra turn prevention (we penalize heavily if human has free moves)
+  let extraTurnsHuman = 0;
+  for (let i = 0; i < 6; i++) {
+    const seeds = board[i];
+    if (seeds > 0) {
+      const stepsToStore = 6 - i;
+      if (seeds === stepsToStore || (seeds > 13 && (seeds - stepsToStore) % 13 === 0)) {
+        extraTurnsHuman += 1;
+      }
+    }
+  }
+  baseEval -= extraTurnsHuman * 130;
+
+  // Heuristic 3: Empty pit (Boş Kuyu / Öksüz kuralı) opportunities for bot
+  for (let i = 7; i <= 12; i++) {
+    if (board[i] === 0) {
+      const oppIdx = 12 - i;
+      if (board[oppIdx] > 0) {
+        baseEval += 80;
+      }
+    }
+  }
+
+  // Heuristic 4: Boş Kuyu danger from human (negative)
+  for (let i = 0; i < 6; i++) {
+    if (board[i] === 0) {
+      const oppIdx = 12 - i;
+      if (board[oppIdx] > 0) {
+        baseEval -= 90;
+      }
+    }
+  }
+
+  // Heuristic 5: Vulnerability of bot's pits (making pits even means human can capture)
+  let vulnerablePits = 0;
+  for (let i = 7; i <= 12; i++) {
+    if (board[i] > 0 && board[i] % 2 !== 0) {
+      vulnerablePits += 1;
+    }
+  }
+  baseEval -= vulnerablePits * 30;
+
+  // Heuristic 6: Number of stones active on bot side (flexibility of choice)
+  let botActiveStones = 0;
+  let humanActiveStones = 0;
+  for (let i = 7; i <= 12; i++) botActiveStones += board[i];
+  for (let i = 0; i < 6; i++) humanActiveStones += board[i];
+
+  baseEval += botActiveStones * 5;
+  baseEval -= humanActiveStones * 3;
+
+  return baseEval;
+}
+
+function getSmartMinimaxMove(board: number[], depth: number = 7, isUnbeatable: boolean = false): number {
   const validPits: number[] = [];
   for (let idx = 7; idx <= 12; idx++) {
     if (board[idx] > 0) validPits.push(idx);
@@ -153,13 +258,27 @@ function getSmartMinimaxMove(board: number[], depth: number = 7): number {
   let bestMove = -1;
   let bestScore = -Infinity;
 
-  for (const pit of validPits) {
+  // Strong move ordering for root to speed up pruning
+  const sortedPits = [...validPits].sort((a, b) => {
+    const seedsA = board[a];
+    const landsInStoreA = (a + seedsA) % 13 === 0;
+    const seedsB = board[b];
+    const landsInStoreB = (b + seedsB) % 13 === 0;
+    
+    if (landsInStoreA && !landsInStoreB) return -1;
+    if (!landsInStoreA && landsInStoreB) return 1;
+    
+    // Fallback to highest seed count first (heavier moves)
+    return b - a;
+  });
+
+  for (const pit of sortedPits) {
     const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
     let score: number;
     if (nextTurn === 'player2') {
-      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, true);
+      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, true, isUnbeatable);
     } else {
-      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, false);
+      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, false, isUnbeatable);
     }
 
     if (score > bestScore) {
@@ -176,34 +295,14 @@ function runMinimax(
   depth: number,
   alpha: number,
   beta: number,
-  isMaximizing: boolean
+  isMaximizing: boolean,
+  isUnbeatable: boolean = false
 ): number {
   const isP1Empty = board.slice(0, 6).every(val => val === 0);
   const isP2Empty = board.slice(7, 13).every(val => val === 0);
 
   if (isP1Empty || isP2Empty || depth === 0) {
-    const finalBoard = [...board];
-    if (isP1Empty) {
-      let rem = 0;
-      for (let i = 7; i <= 12; i++) {
-        rem += finalBoard[i];
-        finalBoard[i] = 0;
-      }
-      finalBoard[6] += rem;
-    } else if (isP2Empty) {
-      let rem = 0;
-      for (let i = 0; i < 6; i++) {
-        rem += finalBoard[i];
-        finalBoard[i] = 0;
-      }
-      finalBoard[13] += rem;
-    }
-    const storeDiff = finalBoard[13] - finalBoard[6];
-    let pitSumDiff = 0;
-    for (let i = 7; i <= 12; i++) pitSumDiff += finalBoard[i];
-    for (let i = 0; i < 6; i++) pitSumDiff -= finalBoard[i];
-
-    return storeDiff * 10 + pitSumDiff * 0.5;
+    return evaluateBoardState(board, isUnbeatable);
   }
 
   if (isMaximizing) {
@@ -213,6 +312,7 @@ function runMinimax(
       if (board[i] > 0) validPits.push(i);
     }
 
+    // Move ordering
     validPits.sort((a, b) => {
       const landsInStoreA = (a + board[a]) % 13 === 0;
       const landsInStoreB = (b + board[b]) % 13 === 0;
@@ -225,9 +325,9 @@ function runMinimax(
       const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
       let score: number;
       if (nextTurn === 'player2') {
-        score = runMinimax(nextBoard, depth - 1, alpha, beta, true);
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, true, isUnbeatable);
       } else {
-        score = runMinimax(nextBoard, depth - 1, alpha, beta, false);
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, false, isUnbeatable);
       }
       maxEval = Math.max(maxEval, score);
       alpha = Math.max(alpha, score);
@@ -255,9 +355,9 @@ function runMinimax(
       const { nextBoard, nextTurn } = executeMove(board, pit, 'player1');
       let score: number;
       if (nextTurn === 'player1') {
-        score = runMinimax(nextBoard, depth - 1, alpha, beta, false);
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, false, isUnbeatable);
       } else {
-        score = runMinimax(nextBoard, depth - 1, alpha, beta, true);
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, true, isUnbeatable);
       }
       minEval = Math.min(minEval, score);
       beta = Math.min(beta, score);
@@ -481,13 +581,15 @@ export default function GameBoard({
   // 1. Sync Room State (Firebase or Local)
   useEffect(() => {
     if (gameMode === 'singleplayer') {
+      const savedDiff = localStorage.getItem('mangala_bot_difficulty') || 'medium';
+      const label = savedDiff === 'easy' ? 'Bilge Bot (Kolay 🟢)' : savedDiff === 'medium' ? 'Bilge Bot (Normal 🔵)' : savedDiff === 'hard' ? 'Bilge Bot (Zor ⚔️)' : 'Zorlu Bilge Bot (Zor+ 👑)';
       const initialRoom: GameRoom = {
         id: roomId,
         player1Id: currUserId,
         player1Name: currUserName,
         player1Ready: true,
         player2Id: 'bot',
-        player2Name: 'Bilge Bot (AI)',
+        player2Name: label,
         player2Ready: true,
         status: 'playing',
         board: initBoard(),
@@ -674,7 +776,27 @@ export default function GameBoard({
       }
 
       const board = offlineRoom.board;
-      const chosenPit = getSmartMinimaxMove(board, 7); // Grandmaster level depth 7
+      const botDiff = (localStorage.getItem('mangala_bot_difficulty') || 'medium') as 'easy' | 'medium' | 'hard' | 'unbeatable';
+      
+      let chosenPit = -1;
+      if (botDiff === 'easy') {
+        const validPits: number[] = [];
+        for (let idx = 7; idx <= 12; idx++) {
+          if (board[idx] > 0) validPits.push(idx);
+        }
+        if (Math.random() < 0.55 && validPits.length > 0) {
+          chosenPit = validPits[Math.floor(Math.random() * validPits.length)];
+        } else {
+          chosenPit = getSmartMinimaxMove(board, 2, false);
+        }
+      } else if (botDiff === 'medium') {
+        chosenPit = getSmartMinimaxMove(board, 4, false);
+      } else if (botDiff === 'hard') {
+        chosenPit = getSmartMinimaxMove(board, 6, false);
+      } else {
+        // unbeatable: Zor+ (9-depth search with hyper heuristics)
+        chosenPit = getSmartMinimaxMove(board, 9, true);
+      }
 
       if (chosenPit !== -1) {
         const { nextBoard, nextTurn, message } = executeMove(

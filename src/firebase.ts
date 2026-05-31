@@ -432,15 +432,15 @@ export async function updateUserProfileName(userId: string, newName: string): Pr
 }
 
 /**
- * Retrieves the global leaderboard (top 50 players by score)
+ * Retrieves the global leaderboard (all players with score > 0 ordered by score descending)
  */
 export async function getLeaderboard(): Promise<UserProfile[]> {
   const path = USERS_COLLECTION;
   try {
     const q = query(
       collection(db, USERS_COLLECTION),
-      orderBy('score', 'desc'),
-      limit(50)
+      where('score', '>', 0),
+      orderBy('score', 'desc')
     );
     const snap = await getDocs(q);
     const users: UserProfile[] = [];
