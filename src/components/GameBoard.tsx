@@ -141,6 +141,27 @@ const playSound = (type: 'stone' | 'capture' | 'extraTurn' | 'gameOver' | 'tick'
   }
 };
 
+function getLastSownIndex(board: number[], startPit: number, player: 'player1' | 'player2'): number {
+  const seeds = board[startPit];
+  if (seeds <= 0) return -1;
+  if (seeds === 1) {
+    return getNextIndex(startPit, player);
+  }
+  let current = startPit;
+  let remaining = seeds - 1;
+  while (remaining > 0) {
+    current = getNextIndex(current, player);
+    remaining--;
+  }
+  return current;
+}
+
+function doesMoveLandInStore(board: number[], startPit: number, player: 'player1' | 'player2'): boolean {
+  const lastIdx = getLastSownIndex(board, startPit, player);
+  const ownStore = player === 'player1' ? 6 : 13;
+  return lastIdx === ownStore;
+}
+
 function evaluateBoardState(board: number[], isUnbeatable: boolean): number {
   const isP1Empty = board.slice(0, 6).every(val => val === 0);
   const isP2Empty = board.slice(7, 13).every(val => val === 0);
@@ -166,8 +187,8 @@ function evaluateBoardState(board: number[], isUnbeatable: boolean): number {
   const humanStore = finalBoard[6];
   const storeDiff = botStore - humanStore;
 
-  // Store difference is weighted extremely high
-  let baseEval = storeDiff * 1000;
+  // Primary goal is strictly winning/scoring stones in the store
+  let baseEval = storeDiff * 5000;
 
   if (!isUnbeatable) {
     // Basic heuristics for simple/medium/hard
@@ -177,71 +198,107 @@ function evaluateBoardState(board: number[], isUnbeatable: boolean): number {
     return baseEval + pitSumDiff * 10;
   }
 
-  // Ultra-advanced heuristics for Zor+ (Yenilmez/Unbeatable AI)
-  // Heuristic 1: Extra turn potential for bot (last seed landing in store 13)
+  // Hyper-advanced heuristics for Zor+ (Yenilmez/Unbeatable AI)
+  
+  // Instant Win or Loss Terminal Check
+  if (botStore > 24) {
+    baseEval += 200000 + (botStore - 24) * 1000;
+  } else if (humanStore > 24) {
+    baseEval -= 200000 + (humanStore - 24) * 1000;
+  }
+
+  // Heuristic 1: Exact extra turn potential for bot (highly valuable)
   let extraTurnsBot = 0;
   for (let i = 7; i <= 12; i++) {
-    const seeds = board[i];
-    if (seeds > 0) {
-      const stepsToStore = 13 - i;
-      // Landing in store gives extra turn
-      if (seeds === stepsToStore || (seeds > 13 && (seeds - stepsToStore) % 13 === 0)) {
-        extraTurnsBot += 1;
-      }
+    if (board[i] > 0 && doesMoveLandInStore(board, i, 'player2')) {
+      extraTurnsBot += 1;
     }
   }
-  baseEval += extraTurnsBot * 150;
+  baseEval += extraTurnsBot * 1500;
 
-  // Heuristic 2: Human extra turn prevention (we penalize heavily if human has free moves)
+  // Heuristic 2: Exact human extra turn prevention (highly dangerous)
   let extraTurnsHuman = 0;
   for (let i = 0; i < 6; i++) {
-    const seeds = board[i];
-    if (seeds > 0) {
-      const stepsToStore = 6 - i;
-      if (seeds === stepsToStore || (seeds > 13 && (seeds - stepsToStore) % 13 === 0)) {
-        extraTurnsHuman += 1;
-      }
+    if (board[i] > 0 && doesMoveLandInStore(board, i, 'player1')) {
+      extraTurnsHuman += 1;
     }
   }
-  baseEval -= extraTurnsHuman * 130;
+  baseEval -= extraTurnsHuman * 1600;
 
-  // Heuristic 3: Empty pit (Boş Kuyu / Öksüz kuralı) opportunities for bot
+  // Heuristic 3: Empty pit (Boş Kuyu / Öksüz) opportunities for the bot
+  let emptyPitsBotHarvest = 0;
   for (let i = 7; i <= 12; i++) {
-    if (board[i] === 0) {
-      const oppIdx = 12 - i;
-      if (board[oppIdx] > 0) {
-        baseEval += 80;
+    if (board[i] > 0) {
+      const lastIdx = getLastSownIndex(board, i, 'player2');
+      if (lastIdx >= 7 && lastIdx <= 12) {
+        if (board[lastIdx] === 0) {
+          const oppIdx = 12 - lastIdx;
+          const oppSeeds = board[oppIdx];
+          if (oppSeeds > 0) {
+            emptyPitsBotHarvest += (oppSeeds + 1);
+          }
+        }
       }
     }
   }
+  baseEval += emptyPitsBotHarvest * 600;
 
-  // Heuristic 4: Boş Kuyu danger from human (negative)
+  // Heuristic 4: Empty pit (Boş Kuyu) danger by the human
+  let emptyPitsHumanHarvest = 0;
   for (let i = 0; i < 6; i++) {
-    if (board[i] === 0) {
-      const oppIdx = 12 - i;
-      if (board[oppIdx] > 0) {
-        baseEval -= 90;
+    if (board[i] > 0) {
+      const lastIdx = getLastSownIndex(board, i, 'player1');
+      if (lastIdx >= 0 && lastIdx <= 5) {
+        if (board[lastIdx] === 0) {
+          const oppIdx = 12 - lastIdx;
+          const oppSeeds = board[oppIdx];
+          if (oppSeeds > 0) {
+            emptyPitsHumanHarvest += (oppSeeds + 1);
+          }
+        }
       }
     }
   }
+  baseEval -= emptyPitsHumanHarvest * 650;
 
-  // Heuristic 5: Vulnerability of bot's pits (making pits even means human can capture)
-  let vulnerablePits = 0;
+  // Heuristic 5: Opponent Even Pit Capture (Çift Kuralı)
+  let evenCapturesBotHarvest = 0;
   for (let i = 7; i <= 12; i++) {
-    if (board[i] > 0 && board[i] % 2 !== 0) {
-      vulnerablePits += 1;
+    if (board[i] > 0) {
+      const lastIdx = getLastSownIndex(board, i, 'player2');
+      if (lastIdx >= 0 && lastIdx <= 5) {
+        const currentOpponentSeeds = board[lastIdx];
+        if ((currentOpponentSeeds + 1) % 2 === 0) {
+          evenCapturesBotHarvest += (currentOpponentSeeds + 1);
+        }
+      }
     }
   }
-  baseEval -= vulnerablePits * 30;
+  baseEval += evenCapturesBotHarvest * 400;
 
-  // Heuristic 6: Number of stones active on bot side (flexibility of choice)
+  // Heuristic 6: Opponent Even Pit Capture against Bot by human
+  let evenCapturesHumanHarvest = 0;
+  for (let i = 0; i < 6; i++) {
+    if (board[i] > 0) {
+      const lastIdx = getLastSownIndex(board, i, 'player1');
+      if (lastIdx >= 7 && lastIdx <= 12) {
+        const currentOpponentSeeds = board[lastIdx];
+        if ((currentOpponentSeeds + 1) % 2 === 0) {
+          evenCapturesHumanHarvest += (currentOpponentSeeds + 1);
+        }
+      }
+    }
+  }
+  baseEval -= evenCapturesHumanHarvest * 450;
+
+  // Heuristic 7: Maintain active, flexible pits (mobility)
   let botActiveStones = 0;
   let humanActiveStones = 0;
   for (let i = 7; i <= 12; i++) botActiveStones += board[i];
   for (let i = 0; i < 6; i++) humanActiveStones += board[i];
 
-  baseEval += botActiveStones * 5;
-  baseEval -= humanActiveStones * 3;
+  baseEval += botActiveStones * 15;
+  baseEval -= humanActiveStones * 10;
 
   return baseEval;
 }
@@ -258,17 +315,14 @@ function getSmartMinimaxMove(board: number[], depth: number = 7, isUnbeatable: b
   let bestMove = -1;
   let bestScore = -Infinity;
 
-  // Strong move ordering for root to speed up pruning
+  // Move ordering for root speeds up pruning by testing lands-in-store first
   const sortedPits = [...validPits].sort((a, b) => {
-    const seedsA = board[a];
-    const landsInStoreA = (a + seedsA) % 13 === 0;
-    const seedsB = board[b];
-    const landsInStoreB = (b + seedsB) % 13 === 0;
+    const landsInStoreA = doesMoveLandInStore(board, a, 'player2');
+    const landsInStoreB = doesMoveLandInStore(board, b, 'player2');
     
     if (landsInStoreA && !landsInStoreB) return -1;
     if (!landsInStoreA && landsInStoreB) return 1;
     
-    // Fallback to highest seed count first (heavier moves)
     return b - a;
   });
 
@@ -314,8 +368,8 @@ function runMinimax(
 
     // Move ordering
     validPits.sort((a, b) => {
-      const landsInStoreA = (a + board[a]) % 13 === 0;
-      const landsInStoreB = (b + board[b]) % 13 === 0;
+      const landsInStoreA = doesMoveLandInStore(board, a, 'player2');
+      const landsInStoreB = doesMoveLandInStore(board, b, 'player2');
       if (landsInStoreA && !landsInStoreB) return -1;
       if (!landsInStoreA && landsInStoreB) return 1;
       return b - a;
@@ -343,9 +397,10 @@ function runMinimax(
       if (board[i] > 0) validPits.push(i);
     }
 
+    // Move ordering
     validPits.sort((a, b) => {
-      const landsInStoreA = (a + board[a]) % 6 === 0;
-      const landsInStoreB = (b + board[b]) % 6 === 0;
+      const landsInStoreA = doesMoveLandInStore(board, a, 'player1');
+      const landsInStoreB = doesMoveLandInStore(board, b, 'player1');
       if (landsInStoreA && !landsInStoreB) return -1;
       if (!landsInStoreA && landsInStoreB) return 1;
       return a - b;
@@ -849,8 +904,8 @@ export default function GameBoard({
       } else if (botDiff === 'hard') {
         chosenPit = getSmartMinimaxMove(board, 6, false);
       } else {
-        // unbeatable: Zor+ (9-depth search with hyper heuristics)
-        chosenPit = getSmartMinimaxMove(board, 9, true);
+        // unbeatable: Zor+ (11-depth search with hyper heuristics)
+        chosenPit = getSmartMinimaxMove(board, 11, true);
       }
 
       if (chosenPit !== -1) {
