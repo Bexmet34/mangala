@@ -1,0 +1,6 @@
+{
+  "name": "Online Mangala",
+  "description": "Çevrimiçi çok oyunculu ve yapay zekaya karşı oynanabilen geleneksel Türk zeka ve strateji oyunu Mangala.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

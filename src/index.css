@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom background styles & aesthetic elements */
+body {
+  font-family: var(--font-sans);
+  background-color: #0f172a; /* deep slate-900 */
+  color: #f8fafc;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Simulated wood grains or aesthetic board effects */
+.wood-grain {
+  background-color: #78350f; /* amber-900 */
+  background-image: 
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Subtle wooden shadow bezel */
+.wood-bezel {
+  box-shadow: 
+    inset 0 4px 10px rgba(0, 0, 0, 0.6),
+    inset 0 -4px 6px rgba(255, 255, 255, 0.05),
+    0 10px 25px -5px rgba(0, 0, 0, 0.7);
+}
+
+.pit-bezel {
+  box-shadow: 
+    inset 0 6px 12px rgba(0, 0, 0, 0.8),
+    0 2px 3px rgba(255, 255, 255, 0.1);
+}
+
+/* Pulsing outline for current turn */
+@keyframes active-turn-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0px rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(245, 158, 11, 0.8);
+  }
+}
+
+.active-turn-glow {
+  animation: active-turn-pulse 2s infinite;
+}

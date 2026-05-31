@@ -1,0 +1,159 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'anonymous');
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Schema Validation Helper
+    function isValidGame(game) {
+      return game.id is string
+        && game.id.size() <= 64
+        && game.player1Id is string
+        && game.player1Id.size() <= 128
+        && game.player1Name is string
+        && game.player1Name.size() <= 100
+        && (game.player2Id == null || (game.player2Id is string && game.player2Id.size() <= 128))
+        && (game.player2Name == null || (game.player2Name is string && game.player2Name.size() <= 100))
+        && game.player1Ready is bool
+        && game.player2Ready is bool
+        && game.status is string
+        && (game.status == 'lobby' || game.status == 'playing' || game.status == 'completed' || game.status == 'abandoned')
+        && game.board is list
+        && game.board.size() == 14
+        && game.board[0] is int
+        && game.turn is string
+        && (game.turn == 'player1' || game.turn == 'player2')
+        && (game.winnerId == null || (game.winnerId is string && game.winnerId.size() <= 128));
+    }
+
+    match /games/{gameId} {
+      // Any authenticated user can read or list games in order to join them
+      allow read, list: if isSignedIn();
+
+      // Creating a game
+      allow create: if isVerified()
+        && isValidId(gameId)
+        && isValidGame(incoming())
+        && incoming().id == gameId
+        && incoming().player1Id == request.auth.uid
+        && incoming().player2Id == null
+        && incoming().player1Ready == false
+        && incoming().player2Ready == false
+        && incoming().status == 'lobby'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      // Updating a game
+      allow update: if isVerified()
+        && isValidId(gameId)
+        && isValidGame(incoming())
+        && incoming().id == gameId
+        // Immutability checks
+        && incoming().player1Id == existing().player1Id
+        && incoming().player1Name == existing().player1Name
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Case 1: Player 2 joins the game
+          (existing().status == 'lobby'
+            && existing().player2Id == null
+            && incoming().player2Id == request.auth.uid
+            && incoming().player2Ready == false
+            && incoming().player1Ready == existing().player1Ready
+            && incoming().status == 'lobby'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['player2Id', 'player2Name', 'player2Ready', 'updatedAt']))
+          
+          // Case 2: Player ready toggles
+          || (existing().status == 'lobby'
+            && (
+              // Player 1 toggles ready
+              (request.auth.uid == existing().player1Id 
+                && incoming().player1Ready != existing().player1Ready
+                && incoming().player2Ready == existing().player2Ready
+                && incoming().player2Id == existing().player2Id
+                && incoming().player2Name == existing().player2Name
+                && incoming().diff(existing()).affectedKeys().hasOnly(['player1Ready', 'status', 'updatedAt']))
+              ||
+              // Player 2 toggles ready
+              (request.auth.uid == existing().player2Id
+                && incoming().player2Ready != existing().player2Ready
+                && incoming().player1Ready == existing().player1Ready
+                && incoming().player2Id == existing().player2Id
+                && incoming().player2Name == existing().player2Name
+                && incoming().diff(existing()).affectedKeys().hasOnly(['player2Ready', 'status', 'updatedAt']))
+            )
+            // Ensure status updates correctly to 'playing' only if both are ready, else remains 'lobby'
+            && (
+              (incoming().player1Ready && incoming().player2Ready && incoming().status == 'playing')
+              || (!incoming().player1Ready || !incoming().player2Ready && incoming().status == 'lobby')
+            ))
+
+          // Case 3: Player makes a move
+          || (existing().status == 'playing'
+            && incoming().status == existing().status
+            && incoming().player2Id == existing().player2Id
+            && incoming().player2Name == existing().player2Name
+            && incoming().player1Ready == existing().player1Ready
+            && incoming().player2Ready == existing().player2Ready
+            && (
+              // Player 1's turn
+              (existing().turn == 'player1'
+                && request.auth.uid == existing().player1Id
+                && incoming().diff(existing()).affectedKeys().hasAny(['board', 'turn'])
+                && incoming().diff(existing()).affectedKeys().hasOnly(['board', 'turn', 'lastMove', 'updatedAt']))
+              ||
+              // Player 2's turn
+              (existing().turn == 'player2'
+                && request.auth.uid == existing().player2Id
+                && incoming().diff(existing()).affectedKeys().hasAny(['board', 'turn'])
+                && incoming().diff(existing()).affectedKeys().hasOnly(['board', 'turn', 'lastMove', 'updatedAt']))
+            ))
+
+          // Case 4: Game completed / finished naturally
+          || (existing().status == 'playing'
+            && incoming().status == 'completed'
+            && incoming().player2Id == existing().player2Id
+            && incoming().player2Name == existing().player2Name
+            && incoming().player1Ready == existing().player1Ready
+            && incoming().player2Ready == existing().player2Ready
+            && incoming().winnerId != null
+            && (request.auth.uid == existing().player1Id || request.auth.uid == existing().player2Id)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['board', 'status', 'winnerId', 'updatedAt', 'lastMove']))
+
+          // Case 5: Game abandoned by a player
+          || (existing().status == 'playing'
+            && incoming().status == 'abandoned'
+            && incoming().player2Id == existing().player2Id
+            && (request.auth.uid == existing().player1Id || request.auth.uid == existing().player2Id)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+
+      // We don't delete game history through normal gameplay, but allow deletion to clean up
+      allow delete: if isSignedIn() && (request.auth.uid == existing().player1Id);
+    }
+  }
+}

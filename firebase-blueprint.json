@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "Game": {
+      "title": "Game",
+      "description": "Mangala game room and board state",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique code for the game room"
+        },
+        "player1Id": {
+          "type": "string",
+          "description": "UID of the first player (creator)"
+        },
+        "player2Id": {
+          "type": "string",
+          "description": "UID of the second player (joined)"
+        },
+        "player1Name": {
+          "type": "string",
+          "description": "Display name of player 1"
+        },
+        "player2Name": {
+          "type": "string",
+          "description": "Display name of player 2"
+        },
+        "player1Ready": {
+          "type": "boolean",
+          "description": "Ready state of player 1"
+        },
+        "player2Ready": {
+          "type": "boolean",
+          "description": "Ready state of player 2"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "lobby",
+            "playing",
+            "completed",
+            "abandoned"
+          ],
+          "description": "Current status of the game"
+        },
+        "board": {
+          "type": "array",
+          "description": "List of 14 numbers (0-5: Player 1 pits, 6: Player 1 Haznesi, 7-12: Player 2 pits, 13: Player 2 Haznesi)"
+        },
+        "turn": {
+          "type": "string",
+          "enum": [
+            "player1",
+            "player2"
+          ],
+          "description": "Whose turn it currently is"
+        },
+        "winnerId": {
+          "type": "string",
+          "description": "ID of the winner or 'draw'"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "player1Id",
+        "player1Name",
+        "player1Ready",
+        "player2Ready",
+        "status",
+        "board",
+        "turn"
+      ]
+    }
+  },
+  "firestore": {
+    "/games/{gameId}": {
+      "schema": "Game",
+      "description": "Active and finished Mangala games"
+    }
+  }
+}
