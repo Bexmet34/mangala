@@ -35,3 +35,14 @@ export interface PlayerProfile {
   name: string;
   isAnonymous: boolean;
 }
+
+export interface UserProfile {
+  uid: string;
+  name: string;
+  isAnonymous: boolean;
+  score: number;
+  gamesWon: number;
+  gamesPlayed: number;
+  createdAt?: any;
+  updatedAt?: any;
+}

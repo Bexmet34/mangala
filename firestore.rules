@@ -29,6 +29,17 @@ service cloud.firestore {
     }
 
     // Schema Validation Helper
+    function isValidUserProfile(user) {
+      return user.uid is string
+        && user.uid.size() <= 128
+        && user.name is string
+        && user.name.size() <= 100
+        && user.isAnonymous is bool
+        && user.score is int
+        && user.gamesWon is int
+        && user.gamesPlayed is int;
+    }
+
     function isValidGame(game) {
       return game.id is string
         && game.id.size() <= 64
@@ -154,6 +165,29 @@ service cloud.firestore {
 
       // We don't delete game history through normal gameplay, but allow deletion to clean up
       allow delete: if isSignedIn() && (request.auth.uid == existing().player1Id);
+    }
+
+    match /users/{userId} {
+      allow read, get, list: if isSignedIn();
+
+      allow create: if isVerified()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().score == 0
+        && incoming().gamesWon == 0
+        && incoming().gamesPlayed == 0
+        && (incoming().createdAt == request.time || incoming().createdAt == null)
+        && (incoming().updatedAt == request.time || incoming().updatedAt == null);
+
+      allow update: if isVerified()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && (incoming().createdAt == existing().createdAt || !incoming().keys().hasAll(['createdAt']))
+        && (incoming().updatedAt == request.time || incoming().updatedAt == null);
     }
   }
 }

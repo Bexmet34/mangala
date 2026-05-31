@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { auth, logoutUser, testConnection } from './firebase';
+import { auth, logoutUser, testConnection, getUserProfile, createUserProfile, updateUserProfileName } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import AuthScreen from './components/AuthScreen';
 import Lobby from './components/Lobby';
@@ -23,16 +23,33 @@ export default function App() {
     // Validate connection
     testConnection();
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        // Fallback to name from localStorage if anonymous login or displayName not set
-        const localName = localStorage.getItem('mangala_nickname');
-        const defaultName = `Oyuncu_${currentUser.uid.substring(0, 4)}`;
-        setUser({
-          uid: currentUser.uid,
-          name: currentUser.displayName || localName || defaultName,
-          isAnonymous: currentUser.isAnonymous
-        });
+        try {
+          const localName = localStorage.getItem('mangala_nickname');
+          const defaultName = currentUser.displayName || localName || `Oyuncu_${currentUser.uid.substring(0, 4)}`;
+          
+          let profile = await getUserProfile(currentUser.uid);
+          if (!profile) {
+            profile = await createUserProfile(currentUser.uid, defaultName, currentUser.isAnonymous);
+          }
+          
+          localStorage.setItem('mangala_nickname', profile.name);
+          setUser({
+            uid: currentUser.uid,
+            name: profile.name,
+            isAnonymous: currentUser.isAnonymous
+          });
+        } catch (e) {
+          console.error("Profile sync error, falling back locally:", e);
+          const localName = localStorage.getItem('mangala_nickname');
+          const defaultName = `Oyuncu_${currentUser.uid.substring(0, 4)}`;
+          setUser({
+            uid: currentUser.uid,
+            name: currentUser.displayName || localName || defaultName,
+            isAnonymous: currentUser.isAnonymous
+          });
+        }
       } else {
         setUser(null);
       }
@@ -124,6 +141,7 @@ export default function App() {
                 userName={user.name} 
                 onSelectGame={handleSelectGame} 
                 onLogout={handleLogout}
+                onUpdateName={(newName: string) => setUser(prev => prev ? { ...prev, name: newName } : null)}
               />
             </motion.div>
           ) : (

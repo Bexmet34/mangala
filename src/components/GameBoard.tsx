@@ -11,7 +11,8 @@ import {
   deleteGameRoom,
   leaveGameRoom,
   auth,
-  db
+  db,
+  awardPoints
 } from '../firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { GameRoom, PlayerRole, GameMove } from '../types';
@@ -546,6 +547,32 @@ export default function GameBoard({
       return () => unsubscribe();
     }
   }, [roomId, gameMode, currUserId, currUserName]);
+
+  // Points award listener on completion
+  useEffect(() => {
+    if (!activeRoom || activeRoom.status !== 'completed' || !activeRoom.id) return;
+    
+    const storageKey = `mangala_points_awarded_${activeRoom.id}`;
+    if (localStorage.getItem(storageKey)) return;
+    
+    // Determine points
+    let points = 2; // participation prize
+    let won = false;
+    
+    if (activeRoom.winnerId === currUserId) {
+      points = gameMode === 'singleplayer' ? 10 : 20; // 20 for multiplayer win, 10 for solo win
+      won = true;
+    } else if (activeRoom.winnerId === 'draw') {
+      points = 5;
+    }
+    
+    awardPoints(currUserId, points, won)
+      .then(() => {
+        localStorage.setItem(storageKey, 'true');
+      })
+      .catch((err) => console.error("Error awarding points: ", err));
+
+  }, [activeRoom?.status, activeRoom?.winnerId, currUserId, gameMode, activeRoom?.id]);
 
   // 2. Play Turn (Human)
   const handlePitClick = async (pitIndex: number) => {

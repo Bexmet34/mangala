@@ -78,12 +78,55 @@
         "board",
         "turn"
       ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with display name and persistent score",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Unique user ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the user"
+        },
+        "isAnonymous": {
+          "type": "boolean",
+          "description": "Whether the user logged in anonymously"
+        },
+        "score": {
+          "type": "integer",
+          "description": "Accumulated game points"
+        },
+        "gamesWon": {
+          "type": "integer",
+          "description": "Number of won games"
+        },
+        "gamesPlayed": {
+          "type": "integer",
+          "description": "Total number of games"
+        }
+      },
+      "required": [
+        "uid",
+        "name",
+        "isAnonymous",
+        "score",
+        "gamesWon",
+        "gamesPlayed"
+      ]
     }
   },
   "firestore": {
     "/games/{gameId}": {
       "schema": "Game",
       "description": "Active and finished Mangala games"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Player profile settings and scores for the leaderboard"
     }
   }
 }

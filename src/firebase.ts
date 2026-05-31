@@ -24,10 +24,12 @@ import {
   getDocs,
   deleteDoc,
   serverTimestamp,
-  getDocFromServer
+  getDocFromServer,
+  limit,
+  orderBy
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { GameRoom, PlayerRole, GameMove } from './types';
+import { GameRoom, PlayerRole, GameMove, UserProfile } from './types';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -372,3 +374,118 @@ export async function getActiveLobbies(): Promise<GameRoom[]> {
     handleFirestoreError(error, OperationType.LIST, path);
   }
 }
+
+const USERS_COLLECTION = 'users';
+
+/**
+ * Fetches user profile for a given userId
+ */
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const path = `${USERS_COLLECTION}/${userId}`;
+  try {
+    const snap = await getDoc(doc(db, USERS_COLLECTION, userId));
+    if (snap.exists()) {
+      return snap.data() as UserProfile;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+/**
+ * Initializes a new user profile in Firestore
+ */
+export async function createUserProfile(userId: string, name: string, isAnonymous: boolean): Promise<UserProfile> {
+  const path = `${USERS_COLLECTION}/${userId}`;
+  const profile: UserProfile = {
+    uid: userId,
+    name: name,
+    isAnonymous: isAnonymous,
+    score: 0,
+    gamesWon: 0,
+    gamesPlayed: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+  try {
+    await setDoc(doc(db, USERS_COLLECTION, userId), profile);
+    return profile;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+/**
+ * Updates user display name in database
+ */
+export async function updateUserProfileName(userId: string, newName: string): Promise<void> {
+  const path = `${USERS_COLLECTION}/${userId}`;
+  try {
+    await updateDoc(doc(db, USERS_COLLECTION, userId), {
+      name: newName,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+/**
+ * Retrieves the global leaderboard (top 50 players by score)
+ */
+export async function getLeaderboard(): Promise<UserProfile[]> {
+  const path = USERS_COLLECTION;
+  try {
+    const q = query(
+      collection(db, USERS_COLLECTION),
+      orderBy('score', 'desc'),
+      limit(50)
+    );
+    const snap = await getDocs(q);
+    const users: UserProfile[] = [];
+    snap.forEach(docSnap => {
+      users.push(docSnap.data() as UserProfile);
+    });
+    return users;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+/**
+ * Awards points and updates stats for a user
+ */
+export async function awardPoints(userId: string, pointsEarned: number, won: boolean): Promise<void> {
+  const path = `${USERS_COLLECTION}/${userId}`;
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    const snap = await getDoc(userRef);
+    if (snap.exists()) {
+      const data = snap.data() as UserProfile;
+      await updateDoc(userRef, {
+        score: (data.score || 0) + pointsEarned,
+        gamesPlayed: (data.gamesPlayed || 0) + 1,
+        gamesWon: (data.gamesWon || 0) + (won ? 1 : 0),
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      // Create user profile real-time if it somehow wasn't initialized
+      const defaultName = localStorage.getItem('mangala_nickname') || `Oyuncu_${userId.substring(0, 4)}`;
+      const profile: UserProfile = {
+        uid: userId,
+        name: defaultName,
+        isAnonymous: auth.currentUser?.isAnonymous ?? true,
+        score: pointsEarned,
+        gamesWon: won ? 1 : 0,
+        gamesPlayed: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      await setDoc(userRef, profile);
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
