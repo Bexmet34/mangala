@@ -316,11 +316,8 @@ export async function leaveGameRoom(roomId: string, role: PlayerRole | 'spectato
     
     if (currentStatus === 'lobby') {
       if (role === 'player1') {
-        // Host left: delete or mark abandoned so it disappears from lobbies
-        await updateDoc(roomRef, {
-          status: 'abandoned',
-          updatedAt: serverTimestamp()
-        });
+        // Host left lobby: delete the room completely from Firebase
+        await deleteDoc(roomRef);
       } else if (role === 'player2') {
         // P2 left: reset P2 slot so other players can join
         await updateDoc(roomRef, {

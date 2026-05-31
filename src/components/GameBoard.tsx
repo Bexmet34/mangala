@@ -375,7 +375,13 @@ export default function GameBoard({
       const roomRef = doc(db, 'games', roomId);
       const unsubscribe = onSnapshot(roomRef, (snapshot) => {
         if (!snapshot.exists()) {
-          setError('Oyun odası kapatılmış veya silinmiş.');
+          setRoom((prev) => {
+            if (prev && (prev.status === 'completed' || prev.status === 'abandoned')) {
+              return prev; // keep current room object so game-over dialog remains visible
+            }
+            setError('Oyun odası kapatılmış veya silinmiş.');
+            return null;
+          });
           setLoading(false);
           return;
         }
@@ -736,14 +742,26 @@ export default function GameBoard({
     setLogMessage('Yeni oyun başladı! Hamle sırası sizde.');
   };
 
-  // Abandon Multiplayer Game
+  // Exit game and clean up from Firestore
   const handleAbandon = async () => {
     if (gameMode === 'singleplayer') {
       onBackToLobby();
       return;
     }
     if (activeRoom) {
-      await leaveGameRoom(roomId, role, activeRoom.status);
+      if (activeRoom.status === 'completed' || activeRoom.status === 'abandoned') {
+        try {
+          await deleteGameRoom(roomId);
+        } catch (e) {
+          console.warn('Failed to delete room on exit:', e);
+        }
+      } else {
+        try {
+          await leaveGameRoom(roomId, role, activeRoom.status);
+        } catch (e) {
+          console.warn('Failed to leave room:', e);
+        }
+      }
     }
     onBackToLobby();
   };
@@ -1011,7 +1029,7 @@ export default function GameBoard({
           </div>
 
           {/* PHYSICAL WOODEN BOARD - THE HEARTS OF THE GAME */}
-          <div className="wood-grain wood-bezel w-full rounded-2xl md:rounded-3xl p-3 md:p-8 flex flex-col md:flex-row relative gap-3 md:gap-4 border border-[#4d2106] select-none shadow-2xl">
+          <div className="wood-grain wood-bezel w-full rounded-2xl md:rounded-3xl p-1.5 xs:p-2 sm:p-3 md:p-8 flex flex-row relative gap-1.5 xs:gap-2 sm:gap-3 md:gap-4 border border-[#4d2106] select-none shadow-2xl items-center">
             {/* Small decorative corner rivets */}
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute top-3 left-3 border border-zinc-950 opacity-40 shadow" />
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute top-3 right-3 border border-zinc-950 opacity-40 shadow" />
@@ -1019,36 +1037,37 @@ export default function GameBoard({
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute bottom-3 right-3 border border-zinc-950 opacity-40 shadow" />
 
             {/* LAYOUT: Player 2 Store (Hazine) - index 13 */}
-            {/* Visual LEFT end for Player 1 perspective or Top on mobile */}
-            <div className={`flex flex-row md:flex-col md:w-36 w-full h-16 sm:h-20 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-xl md:rounded-2xl p-3 items-center justify-between text-center relative border gap-2 transition-all duration-300 ${
+            {/* Visual LEFT end for Player 1 perspective */}
+            <div className={`flex flex-col w-10 xs:w-14 sm:w-20 md:w-36 h-36 xs:h-44 sm:h-56 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl p-1 xs:p-2 md:p-3 items-center justify-between text-center relative border gap-1 xs:gap-2 transition-all duration-300 ${
               animatingPit === 13 
                 ? 'border-indigo-400 ring-4 ring-indigo-500/50 bg-[#542406] scale-102 z-10' 
                 : 'border-amber-950/40'
             }`}>
               {animatingPit === 13 && (
-                <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
+                <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
               )}
-              <span className="text-[9px] md:text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono text-left md:text-center shrink-0">
-                {activeRoom.player2Name}'in Haznesi
+              <span className="text-[7px] xs:text-[8px] sm:text-[9px] md:text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono text-center shrink-0 leading-none">
+                <span className="hidden sm:inline">{activeRoom.player2Name}'in Haznesi</span>
+                <span className="sm:hidden">P2</span>
               </span>
               
               {/* Stones area */}
-              <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[24px]">
-                <div className="absolute inset-0 flex items-center justify-center scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
+              <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[16px] xs:min-h-[24px]">
+                <div className="absolute inset-0 flex items-center justify-center scale-[0.45] xs:scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
                   {renderStones(displayBoard ? displayBoard[13] : activeRoom.board[13])}
                 </div>
               </div>
 
-              <div className="font-mono text-xl md:text-3xl font-extrabold text-indigo-400 drop-shadow shadow-indigo-950 pb-0.5 px-1 shrink-0">
+              <div className="font-mono text-xs xs:text-sm sm:text-2xl md:text-3xl font-extrabold text-indigo-400 drop-shadow shadow-indigo-950 pb-0.5 px-0.5 shrink-0">
                 {displayBoard ? displayBoard[13] : activeRoom.board[13]}
               </div>
             </div>
 
             {/* Pits Matrix Column */}
-            <div className="flex-1 flex flex-col justify-between gap-3 sm:gap-4 md:gap-6">
+            <div className="flex-1 flex flex-col justify-between gap-1.5 xs:gap-2 sm:gap-4 md:gap-6">
               
               {/* TOP ROW: Player 2 pits (Indices: 12, 11, 10, 9, 8, 7) */}
-              <div className="grid grid-cols-6 gap-1.5 sm:gap-3 md:gap-4">
+              <div className="grid grid-cols-6 gap-1 xs:gap-1.5 sm:gap-3 md:gap-4">
                 {[12, 11, 10, 9, 8, 7].map((idx) => {
                   const seeds = displayBoard ? displayBoard[idx] : activeRoom.board[idx];
                   const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 && isP2 && !isSowing;
@@ -1058,7 +1077,7 @@ export default function GameBoard({
                       key={idx}
                       onClick={() => clickable && handlePitClick(idx)}
                       disabled={!clickable}
-                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1.5 sm:p-2 relative transition-all duration-300 border ${
+                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1 sm:p-2 relative transition-all duration-300 border ${
                         idx === animatingPit
                           ? 'border-indigo-400 ring-4 ring-indigo-500/50 bg-[#5e2604] scale-105 z-10'
                           : 'border-amber-950/20'
@@ -1073,20 +1092,20 @@ export default function GameBoard({
                       }`}
                     >
                       {idx === animatingPit && (
-                        <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
+                        <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
                       )}
-                      <span className="text-[8px] md:text-[9px] font-bold font-mono text-indigo-400 absolute top-1 md:top-1.5 left-1 md:left-2">
+                      <span className="text-[7px] xs:text-[8px] sm:text-[9px] font-bold font-mono text-indigo-400 absolute top-0.5 xs:top-1 left-0.5 xs:left-1.5">
                         {13 - idx}
                       </span>
 
                       {/* Stones Container */}
-                      <div className="flex-1 w-full relative overflow-hidden mt-1">
-                        <div className="absolute inset-0 flex items-center justify-center scale-65 sm:scale-95 md:scale-100 transform origin-center transition-transform">
+                      <div className="flex-1 w-full relative overflow-hidden mt-0.5 xs:mt-1">
+                        <div className="absolute inset-0 flex items-center justify-center scale-[0.4] xs:scale-65 sm:scale-95 md:scale-100 transform origin-center transition-transform">
                           {renderStones(seeds)}
                         </div>
                       </div>
 
-                      <span className="font-mono text-xs sm:text-md md:text-xl font-bold text-indigo-400 pb-0.5 sm:pb-1 pt-0.5 md:pt-0">
+                      <span className="font-mono text-xxs xs:text-xs sm:text-md md:text-xl font-bold text-indigo-400 pb-0.5 sm:pb-1 pt-0.5 md:pt-0">
                         {seeds}
                       </span>
                     </button>
@@ -1095,7 +1114,7 @@ export default function GameBoard({
               </div>
 
               {/* BOTTOM ROW: Player 1 pits (Indices: 0, 1, 2, 3, 4, 5) */}
-              <div className="grid grid-cols-6 gap-1.5 sm:gap-3 md:gap-4">
+              <div className="grid grid-cols-6 gap-1 xs:gap-1.5 sm:gap-3 md:gap-4">
                 {[0, 1, 2, 3, 4, 5].map((idx) => {
                   const seeds = displayBoard ? displayBoard[idx] : activeRoom.board[idx];
                   const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player1' && seeds > 0 && isP1 && !isSowing;
@@ -1105,7 +1124,7 @@ export default function GameBoard({
                       key={idx}
                       onClick={() => clickable && handlePitClick(idx)}
                       disabled={!clickable}
-                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1.5 sm:p-2 relative transition-all duration-300 border ${
+                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1 sm:p-2 relative transition-all duration-300 border ${
                         idx === animatingPit
                           ? 'border-amber-400 ring-4 ring-amber-500/50 bg-[#5e2604] scale-105 z-10'
                           : 'border-amber-950/20'
@@ -1116,20 +1135,20 @@ export default function GameBoard({
                       }`}
                     >
                       {idx === animatingPit && (
-                        <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
+                        <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
                       )}
-                      <span className="text-[8px] md:text-[9px] font-bold font-mono text-amber-500 absolute top-1 md:top-1.5 left-1 md:left-2">
+                      <span className="text-[7px] xs:text-[8px] sm:text-[9px] font-bold font-mono text-amber-500 absolute top-0.5 xs:top-1 left-0.5 xs:left-1.5">
                         {idx + 1}
                       </span>
 
                       {/* Stones Container */}
-                      <div className="flex-1 w-full relative overflow-hidden mt-1">
-                        <div className="absolute inset-0 flex items-center justify-center scale-65 sm:scale-95 md:scale-100 transform origin-center transition-transform">
+                      <div className="flex-1 w-full relative overflow-hidden mt-0.5 xs:mt-1">
+                        <div className="absolute inset-0 flex items-center justify-center scale-[0.4] xs:scale-65 sm:scale-95 md:scale-100 transform origin-center transition-transform">
                           {renderStones(seeds)}
                         </div>
                       </div>
 
-                      <span className="font-mono text-xs sm:text-md md:text-xl font-bold text-amber-500 pb-0.5 sm:pb-1 pt-0.5 md:pt-0">
+                      <span className="font-mono text-xxs xs:text-xs sm:text-md md:text-xl font-bold text-amber-500 pb-0.5 sm:pb-1 pt-0.5 md:pt-0">
                         {seeds}
                       </span>
                     </button>
@@ -1139,27 +1158,28 @@ export default function GameBoard({
             </div>
 
             {/* LAYOUT: Player 1 Store (Hazine) - index 6 */}
-            {/* Visual RIGHT end for Player 1 perspective or Bottom on mobile */}
-            <div className={`flex flex-row md:flex-col md:w-36 w-full h-16 sm:h-20 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-xl md:rounded-2xl p-3 items-center justify-between text-center relative border gap-2 transition-all duration-300 ${
+            {/* Visual RIGHT end for Player 1 perspective */}
+            <div className={`flex flex-col w-10 xs:w-14 sm:w-20 md:w-36 h-36 xs:h-44 sm:h-56 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-lg xs:rounded-xl md:rounded-2xl p-1 xs:p-2 md:p-3 items-center justify-between text-center relative border gap-1 xs:gap-2 transition-all duration-300 ${
               animatingPit === 6 
                 ? 'border-amber-400 ring-4 ring-amber-500/50 bg-[#542406] scale-102 z-10' 
                 : 'border-amber-950/40'
             }`}>
               {animatingPit === 6 && (
-                <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
+                <span className="absolute inset-0 rounded-lg xs:rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
               )}
-              <span className="text-[9px] md:text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono text-left md:text-center shrink-0">
-                {activeRoom.player1Name}'in Haznesi
+              <span className="text-[7px] xs:text-[8px] sm:text-[9px] md:text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono text-center shrink-0 leading-none">
+                <span className="hidden sm:inline">{activeRoom.player1Name}'in Haznesi</span>
+                <span className="sm:hidden">P1</span>
               </span>
               
               {/* Stones area */}
-              <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[24px]">
-                <div className="absolute inset-0 flex items-center justify-center scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
+              <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[16px] xs:min-h-[24px]">
+                <div className="absolute inset-0 flex items-center justify-center scale-[0.45] xs:scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
                   {renderStones(displayBoard ? displayBoard[6] : activeRoom.board[6])}
                 </div>
               </div>
 
-              <div className="font-mono text-xl md:text-3xl font-extrabold text-amber-500 drop-shadow shadow-amber-950 pb-0.5 px-1 shrink-0">
+              <div className="font-mono text-xs xs:text-sm sm:text-2xl md:text-3xl font-extrabold text-amber-500 drop-shadow shadow-amber-950 pb-0.5 px-0.5 shrink-0">
                 {displayBoard ? displayBoard[6] : activeRoom.board[6]}
               </div>
             </div>
@@ -1258,7 +1278,7 @@ export default function GameBoard({
                 ) : null}
                 
                 <button
-                  onClick={onBackToLobby}
+                  onClick={handleAbandon}
                   className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl transition font-medium text-sm cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <Home className="w-4 h-4 text-amber-500" />
@@ -1291,7 +1311,7 @@ export default function GameBoard({
               </div>
 
               <button
-                onClick={onBackToLobby}
+                onClick={handleAbandon}
                 className="w-full py-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-white transition text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
