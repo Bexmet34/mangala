@@ -456,19 +456,49 @@ export async function getLeaderboard(): Promise<UserProfile[]> {
 /**
  * Awards points and updates stats for a user
  */
-export async function awardPoints(userId: string, pointsEarned: number, won: boolean): Promise<void> {
+export async function awardPoints(
+  userId: string, 
+  pointsEarned: number, 
+  won: boolean,
+  gameMode?: string,
+  difficulty?: string
+): Promise<{ pointsAwarded: number; capped: boolean; oldScore: number; newScore: number }> {
   const path = `${USERS_COLLECTION}/${userId}`;
   try {
     const userRef = doc(db, USERS_COLLECTION, userId);
     const snap = await getDoc(userRef);
+    let scoreToAward = pointsEarned;
+    let capped = false;
+    let oldScore = 0;
+
     if (snap.exists()) {
       const data = snap.data() as UserProfile;
+      oldScore = data.score || 0;
+
+      // Rule: In singleplayer easy difficulty, if they are already >= 30 score, they cannot win any more points.
+      if (gameMode === 'singleplayer' && difficulty === 'easy') {
+        if (oldScore >= 30) {
+          scoreToAward = 0;
+          capped = true;
+        } else if (oldScore + scoreToAward > 30) {
+          scoreToAward = 30 - oldScore;
+          capped = true;
+        }
+      }
+
       await updateDoc(userRef, {
-        score: (data.score || 0) + pointsEarned,
+        score: oldScore + scoreToAward,
         gamesPlayed: (data.gamesPlayed || 0) + 1,
         gamesWon: (data.gamesWon || 0) + (won ? 1 : 0),
         updatedAt: serverTimestamp()
       });
+
+      return {
+        pointsAwarded: scoreToAward,
+        capped,
+        oldScore,
+        newScore: oldScore + scoreToAward
+      };
     } else {
       // Create user profile real-time if it somehow wasn't initialized
       const defaultName = localStorage.getItem('mangala_nickname') || `Oyuncu_${userId.substring(0, 4)}`;
@@ -476,16 +506,24 @@ export async function awardPoints(userId: string, pointsEarned: number, won: boo
         uid: userId,
         name: defaultName,
         isAnonymous: auth.currentUser?.isAnonymous ?? true,
-        score: pointsEarned,
+        score: scoreToAward,
         gamesWon: won ? 1 : 0,
         gamesPlayed: 1,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
       await setDoc(userRef, profile);
+
+      return {
+        pointsAwarded: scoreToAward,
+        capped: false,
+        oldScore: 0,
+        newScore: scoreToAward
+      };
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
   }
 }
 

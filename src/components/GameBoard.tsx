@@ -406,6 +406,10 @@ export default function GameBoard({
   const [offlineRoom, setOfflineRoom] = useState<GameRoom | null>(null);
   const botThinkingRef = useRef(false);
 
+  // Score accumulation states on completion
+  const [earnedPoints, setEarnedPoints] = useState<number | null>(null);
+  const [pointsCapped, setPointsCapped] = useState<boolean>(false);
+
   // Determine user's role: P1, P2 or spectator
   const getPlayerRole = (currentRoom: GameRoom): PlayerRole | 'spectator' => {
     if (gameMode === 'singleplayer') return 'player1';
@@ -655,22 +659,73 @@ export default function GameBoard({
     if (!activeRoom || activeRoom.status !== 'completed' || !activeRoom.id) return;
     
     const storageKey = `mangala_points_awarded_${activeRoom.id}`;
-    if (localStorage.getItem(storageKey)) return;
+    if (localStorage.getItem(storageKey)) {
+      const storedPoints = localStorage.getItem(`mangala_points_earned_val_${activeRoom.id}`);
+      const storedCapped = localStorage.getItem(`mangala_points_capped_val_${activeRoom.id}`);
+      if (storedPoints !== null) setEarnedPoints(parseInt(storedPoints, 10));
+      if (storedCapped !== null) setPointsCapped(storedCapped === 'true');
+      return;
+    }
     
-    // Determine points
+    // Determine points based on gameMode and bot difficulty
     let points = 2; // participation prize
     let won = false;
     
+    const botDiff = (localStorage.getItem('mangala_bot_difficulty') || 'medium') as 'easy' | 'medium' | 'hard' | 'unbeatable';
+
     if (activeRoom.winnerId === currUserId) {
-      points = gameMode === 'singleplayer' ? 10 : 20; // 20 for multiplayer win, 10 for solo win
       won = true;
+      if (gameMode === 'singleplayer') {
+        if (botDiff === 'easy') {
+          points = 4;
+        } else if (botDiff === 'medium') {
+          points = 10;
+        } else if (botDiff === 'hard') {
+          points = 18;
+        } else if (botDiff === 'unbeatable') {
+          points = 35;
+        }
+      } else {
+        points = 20; // multiplayer win
+      }
     } else if (activeRoom.winnerId === 'draw') {
-      points = 5;
+      if (gameMode === 'singleplayer') {
+        if (botDiff === 'easy') {
+          points = 1;
+        } else if (botDiff === 'medium') {
+          points = 3;
+        } else if (botDiff === 'hard') {
+          points = 5;
+        } else if (botDiff === 'unbeatable') {
+          points = 10;
+        }
+      } else {
+        points = 5; // multiplayer draw
+      }
+    } else {
+      // Loss
+      if (gameMode === 'singleplayer') {
+        if (botDiff === 'easy') {
+          points = 0;
+        } else if (botDiff === 'medium') {
+          points = 1;
+        } else if (botDiff === 'hard') {
+          points = 2;
+        } else if (botDiff === 'unbeatable') {
+          points = 4;
+        }
+      } else {
+        points = 2; // multiplayer loss participation prize
+      }
     }
     
-    awardPoints(currUserId, points, won)
-      .then(() => {
+    awardPoints(currUserId, points, won, gameMode || 'multiplayer', botDiff)
+      .then((res) => {
         localStorage.setItem(storageKey, 'true');
+        localStorage.setItem(`mangala_points_earned_val_${activeRoom.id}`, String(res.pointsAwarded));
+        localStorage.setItem(`mangala_points_capped_val_${activeRoom.id}`, String(res.capped));
+        setEarnedPoints(res.pointsAwarded);
+        setPointsCapped(res.capped);
       })
       .catch((err) => console.error("Error awarding points: ", err));
 
@@ -1478,7 +1533,7 @@ export default function GameBoard({
               {/* Status declaration */}
               <div>
                 {activeRoom.winnerId === 'draw' ? (
-                  <div className="bg-slate-900 border border-slate-75 w-full py-3.5 rounded-xl font-extrabold text-slate-200">
+                  <div className="bg-slate-900 border border-slate-75 lg:border-slate-700 w-full py-3.5 rounded-xl font-extrabold text-slate-200">
                     OYUN BERABERE BİTTİ (24 - 24)
                   </div>
                 ) : (
@@ -1489,10 +1544,25 @@ export default function GameBoard({
                   }`}>
                     {activeRoom.winnerId === currUserId 
                       ? 'TEBRİKLER, OYUNU KAZANDINIZ 🎉' 
-                      : `${activeRoom.winnerId === 'bot' ? 'YAPAY ZEKA' : 'RAKİP'} MAÇI KAZANDI`}
+                      : `${activeRoom.winnerId === 'bot' || activeRoom.player2Id === 'bot' ? 'BİLGE BOT' : 'RAKİP'} MAÇI KAZANDI`}
                   </div>
                 )}
               </div>
+
+              {/* Earned points information display */}
+              {earnedPoints !== null && (
+                <div className="bg-slate-900 border border-slate-750 p-4 rounded-xl flex flex-col items-center justify-center gap-1.5 dynamic-points-pouch">
+                  <div className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">Kazanılan Derece Puanı</div>
+                  <div className="text-2xl font-black text-amber-400 font-mono flex items-center gap-1">
+                    ⭐ +{earnedPoints} Puan
+                  </div>
+                  {pointsCapped && (
+                    <div className="text-[11px] text-rose-400 bg-rose-950/20 border border-rose-900/30 p-2.5 rounded-xl leading-relaxed font-medium mt-1">
+                      ⚠️ <strong>Maksimum Limit Uyarısı:</strong> Basit mod seçeneğinden kazanabileceğiniz maksimum puan limitine (30 Puan) ulaştınız. Sıralamada üst sıralara tırmanmak için lütfen Normal, Zor veya Zor+ zorluk düzeylerinde oynayın!
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Play again or exit */}
               <div className="flex gap-3">
