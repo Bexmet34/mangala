@@ -163,6 +163,11 @@ export default function GameBoard({
   const [botIsThinking, setBotIsThinking] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
 
+  // Sowing Animation states
+  const [displayBoard, setDisplayBoard] = useState<number[] | null>(null);
+  const [animatingPit, setAnimatingPit] = useState<number | null>(null);
+  const [isSowing, setIsSowing] = useState(false);
+
   // Sound sync variables
   const prevBoardRef = useRef<number[] | null>(null);
   const prevTurnRef = useRef<PlayerRole | null>(null);
@@ -182,10 +187,171 @@ export default function GameBoard({
 
   const activeRoom = gameMode === 'singleplayer' ? offlineRoom : room;
 
+  // Sync displayBoard with activeRoom when not animating
+  useEffect(() => {
+    if (!isSowing && activeRoom) {
+      setDisplayBoard([...activeRoom.board]);
+    }
+  }, [activeRoom?.board, isSowing]);
+
+  // Initial load sync
+  useEffect(() => {
+    if (activeRoom && !displayBoard) {
+      setDisplayBoard([...activeRoom.board]);
+    }
+  }, [activeRoom]);
+
+  // Helper to generate step-by-step state for the sowing (dağıtma) animation
+  const getSowingSteps = (
+    boardState: number[],
+    startIndex: number,
+    player: PlayerRole
+  ) => {
+    interface AnimationStep {
+      board: number[];
+      currentPit: number;
+      soundType: 'stone' | 'capture' | 'extraTurn' | 'none';
+    }
+
+    const steps: AnimationStep[] = [];
+    let tempBoard = [...boardState];
+    const seeds = tempBoard[startIndex];
+    if (seeds <= 0) return [];
+
+    // Reset starting pit
+    tempBoard[startIndex] = 0;
+    let current = startIndex;
+
+    if (seeds === 1) {
+      current = getNextIndex(current, player);
+      tempBoard[current] += 1;
+      steps.push({
+        board: [...tempBoard],
+        currentPit: current,
+        soundType: 'stone'
+      });
+    } else {
+      tempBoard[startIndex] = 1;
+      steps.push({
+        board: [...tempBoard],
+        currentPit: startIndex,
+        soundType: 'stone'
+      });
+
+      let remaining = seeds - 1;
+      while (remaining > 0) {
+        current = getNextIndex(current, player);
+        tempBoard[current] += 1;
+        steps.push({
+          board: [...tempBoard],
+          currentPit: current,
+          soundType: 'stone'
+        });
+        remaining--;
+      }
+    }
+
+    // Capture & scoring checks
+    const ownStoreIndex = player === 'player1' ? 6 : 13;
+    const opponentStoreIndex = player === 'player1' ? 13 : 6;
+
+    if (current === ownStoreIndex) {
+      steps.push({
+        board: [...tempBoard],
+        currentPit: current,
+        soundType: 'extraTurn'
+      });
+    } else {
+      const isOwnSide = player === 'player1' ? (current >= 0 && current <= 5) : (current >= 7 && current <= 12);
+      
+      if (isOwnSide) {
+        if (tempBoard[current] === 1) {
+          const oppositeIndex = 12 - current;
+          const opponentSeeds = tempBoard[oppositeIndex];
+          if (opponentSeeds > 0) {
+            tempBoard[ownStoreIndex] += 1 + opponentSeeds;
+            tempBoard[current] = 0;
+            tempBoard[oppositeIndex] = 0;
+            steps.push({
+              board: [...tempBoard],
+              currentPit: ownStoreIndex,
+              soundType: 'capture'
+            });
+          }
+        }
+      } else if (current !== opponentStoreIndex) {
+        if (tempBoard[current] % 2 === 0) {
+          const capturedSeeds = tempBoard[current];
+          tempBoard[ownStoreIndex] += capturedSeeds;
+          tempBoard[current] = 0;
+          steps.push({
+            board: [...tempBoard],
+            currentPit: ownStoreIndex,
+            soundType: 'capture'
+          });
+        }
+      }
+    }
+
+    // Check game completed sweeping
+    const isP1Empty = tempBoard.slice(0, 6).every(val => val === 0);
+    const isP2Empty = tempBoard.slice(7, 13).every(val => val === 0);
+    if (isP1Empty || isP2Empty) {
+      if (isP1Empty) {
+        let remainingSeeds = 0;
+        for (let i = 7; i <= 12; i++) {
+          remainingSeeds += tempBoard[i];
+          tempBoard[i] = 0;
+        }
+        tempBoard[6] += remainingSeeds;
+      } else {
+        let remainingSeeds = 0;
+        for (let i = 0; i < 6; i++) {
+          remainingSeeds += tempBoard[i];
+          tempBoard[i] = 0;
+        }
+        tempBoard[13] += remainingSeeds;
+      }
+      steps.push({
+        board: [...tempBoard],
+        currentPit: ownStoreIndex,
+        soundType: 'none'
+      });
+    }
+
+    return steps;
+  };
+
+  // Sowing step-by-step animator
+  const runSowingAnimation = async (
+    startIndex: number,
+    player: PlayerRole,
+    startBoard: number[]
+  ): Promise<number[]> => {
+    setIsSowing(true);
+    const steps = getSowingSteps(startBoard, startIndex, player);
+    
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      setDisplayBoard(step.board);
+      setAnimatingPit(step.currentPit);
+      
+      if (step.soundType !== 'none') {
+        playSound(step.soundType);
+      }
+      
+      const delay = (step.soundType === 'capture' || step.soundType === 'extraTurn') ? 350 : 160;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    setAnimatingPit(null);
+    setIsSowing(false);
+    return steps.length > 0 ? steps[steps.length - 1].board : startBoard;
+  };
+
   // 1. Sync Room State (Firebase or Local)
   useEffect(() => {
     if (gameMode === 'singleplayer') {
-      // Setup offline single player game room
       const initialRoom: GameRoom = {
         id: roomId,
         player1Id: currUserId,
@@ -194,7 +360,7 @@ export default function GameBoard({
         player2Id: 'bot',
         player2Name: 'Bilge Bot (AI)',
         player2Ready: true,
-        status: 'playing', // starts instantly
+        status: 'playing',
         board: initBoard(),
         turn: 'player1',
         winnerId: null,
@@ -203,9 +369,9 @@ export default function GameBoard({
         updatedAt: new Date()
       };
       setOfflineRoom(initialRoom);
+      setDisplayBoard(initialRoom.board);
       setLoading(false);
     } else {
-      // Multiplayer Firestore Listener with real-time sounds
       const roomRef = doc(db, 'games', roomId);
       const unsubscribe = onSnapshot(roomRef, (snapshot) => {
         if (!snapshot.exists()) {
@@ -217,43 +383,25 @@ export default function GameBoard({
         const incomingRoom = snapshot.data() as GameRoom;
         if (incomingRoom) {
           const userRole = getPlayerRole(incomingRoom);
+          const lastMov = incomingRoom.lastMove;
+          const prevBoard = prevBoardRef.current;
           
-          if (prevBoardRef.current) {
-            const prevBoard = prevBoardRef.current;
-            const newBoard = incomingRoom.board;
-            const prevStatus = prevStatusRef.current;
-            
-            if (incomingRoom.status === 'completed' && prevStatus !== 'completed') {
-              playSound('gameOver');
-            } else {
-              const lastMov = incomingRoom.lastMove;
-              // Play sound only if the move was done by the opponent
-              if (lastMov && lastMov.player !== userRole) {
-                const p1StoreDiff = newBoard[6] - prevBoard[6];
-                const p2StoreDiff = newBoard[13] - prevBoard[13];
-                
-                if (incomingRoom.status === 'completed') {
-                  playSound('gameOver');
-                } else if (p1StoreDiff > 1 || p2StoreDiff > 1) {
-                  playSound('capture');
-                } else if (incomingRoom.turn === prevTurnRef.current) {
-                  playSound('extraTurn');
-                } else {
-                  playSound('stone');
-                }
-
-                // Log details of what opponent played
-                const oppName = lastMov.player === 'player1' ? incomingRoom.player1Name : (incomingRoom.player2Name || 'Rakip');
-                setLogMessage(`${oppName}, ${lastMov.pitIndex + 1}. kuyuyu seçerek hamlesini tamamladı.`);
-              }
+          if (prevBoard && lastMov && lastMov.player !== userRole) {
+            // Animating Opponent's Move real-time!
+            setRoom(incomingRoom);
+            const oppName = lastMov.player === 'player1' ? incomingRoom.player1Name : (incomingRoom.player2Name || 'Rakip');
+            setLogMessage(`${oppName}, ${lastMov.pitIndex + 1}. kuyuyu seçerek hamlesini tamamladı.`);
+            runSowingAnimation(lastMov.pitIndex, lastMov.player, prevBoard);
+          } else {
+            setRoom(incomingRoom);
+            if (!isSowing) {
+              setDisplayBoard([...incomingRoom.board]);
             }
           }
           
           prevBoardRef.current = incomingRoom.board;
           prevTurnRef.current = incomingRoom.turn;
           prevStatusRef.current = incomingRoom.status;
-
-          setRoom(incomingRoom);
           setLoading(false);
         }
       }, (err) => {
@@ -269,19 +417,24 @@ export default function GameBoard({
   const handlePitClick = async (pitIndex: number) => {
     if (!activeRoom) return;
     if (activeRoom.status !== 'playing') return;
+    if (isSowing) return;
 
     const userRole = getPlayerRole(activeRoom);
     if (userRole === 'spectator') return;
 
-    // Check custom turns
     if (activeRoom.turn !== userRole) {
       setLogMessage('Sıra sizde değil! Rakibin oynamasını bekleyin.');
       return;
     }
 
-    // Execute Move locally
+    const startBoard = [...activeRoom.board];
+    
+    // Execute visually first
+    const animatedFinalBoard = await runSowingAnimation(pitIndex, userRole, startBoard);
+
+    // Calculate core rules move next
     const { nextBoard, nextTurn, message } = executeMove(
-      activeRoom.board, 
+      startBoard, 
       pitIndex, 
       userRole
     );
@@ -291,23 +444,13 @@ export default function GameBoard({
       return;
     }
 
-    // Play tactile sound effect
-    const gameOver = isGameOver(nextBoard);
-    if (gameOver) {
-      playSound('gameOver');
-    } else if (message.includes('Boş kuyu') || message.includes('Çift kuralı')) {
-      playSound('capture');
-    } else if (message.includes('Tekrar oynama hakkı')) {
-      playSound('extraTurn');
-    } else {
-      playSound('stone');
-    }
-
     setLogMessage(message || `${userRole === 'player1' ? activeRoom.player1Name : activeRoom.player2Name} bir hamle yaptı.`);
 
+    const gameOver = isGameOver(nextBoard);
     let winnerId = null;
 
     if (gameOver) {
+      playSound('gameOver');
       if (nextBoard[6] > nextBoard[13]) {
         winnerId = activeRoom.player1Id;
       } else if (nextBoard[13] > nextBoard[6]) {
@@ -324,7 +467,6 @@ export default function GameBoard({
     };
 
     if (gameMode === 'singleplayer') {
-      // Offline transition
       setOfflineRoom(prev => {
         if (!prev) return null;
         return {
@@ -338,7 +480,6 @@ export default function GameBoard({
         };
       });
     } else {
-      // Firebase Multiplayer Update
       await makeGameMove(
         roomId, 
         nextBoard, 
@@ -352,7 +493,7 @@ export default function GameBoard({
 
   // 3. Bot Decider Algorithm (Singleplayer)
   useEffect(() => {
-    if (gameMode !== 'singleplayer' || !offlineRoom) return;
+    if (gameMode !== 'singleplayer' || !offlineRoom || isSowing) return;
     if (offlineRoom.status !== 'playing') return;
     if (offlineRoom.turn !== 'player2') {
       botThinkingRef.current = false;
@@ -365,7 +506,6 @@ export default function GameBoard({
     setBotIsThinking(true);
 
     const thinkingTimer = setTimeout(() => {
-      // Double check states inside timeout closure
       if (!offlineRoom || offlineRoom.status !== 'playing' || offlineRoom.turn !== 'player2') {
         botThinkingRef.current = false;
         setBotIsThinking(false);
@@ -384,10 +524,9 @@ export default function GameBoard({
         return;
       }
 
-      // Dynamic smart selection algorithm
       let chosenPit = -1;
 
-      // Rule 3.1: Lands in store (13) giving free slot turn
+      // Bot Decider Heuristics
       for (const pit of validPits) {
         const seeds = board[pit];
         let current = pit;
@@ -406,7 +545,6 @@ export default function GameBoard({
         }
       }
 
-      // Rule 3.2: Opponent captures (even total or empty landing captures)
       if (chosenPit === -1) {
         for (const pit of validPits) {
           const seeds = board[pit];
@@ -441,7 +579,6 @@ export default function GameBoard({
         }
       }
 
-      // Default Heuristic: Maximize distribution or first valid pit
       if (chosenPit === -1) {
         let maxStones = -1;
         for (const pit of validPits) {
@@ -452,7 +589,6 @@ export default function GameBoard({
         }
       }
 
-      // Apply bot play
       if (chosenPit !== -1) {
         const { nextBoard, nextTurn, message } = executeMove(
           board,
@@ -467,7 +603,7 @@ export default function GameBoard({
           if (nextBoard[6] > nextBoard[13]) {
             winnerId = offlineRoom.player1Id;
           } else if (nextBoard[13] > nextBoard[6]) {
-            winnerId = offlineRoom.player2Id; // Bot wins
+            winnerId = offlineRoom.player2Id;
           } else {
             winnerId = 'draw';
           }
@@ -475,41 +611,34 @@ export default function GameBoard({
 
         setLogMessage('Bilge Bot: ' + (message || 'Bir hamle yaptı.'));
         
-        // Play synthesized sound effect for robot play
-        if (gameOver) {
-          playSound('gameOver');
-        } else if (message.includes('Boş kuyu') || message.includes('Çift kuralı')) {
-          playSound('capture');
-        } else if (message.includes('Tekrar oynama hakkı')) {
-          playSound('extraTurn');
-        } else {
-          playSound('stone');
-        }
-        
-        setOfflineRoom(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            board: nextBoard,
-            turn: nextTurn,
-            status: gameOver ? 'completed' : 'playing',
-            winnerId,
-            lastMove: {
-              player: 'player2',
-              pitIndex: chosenPit,
-              timestamp: Date.now()
-            },
-            updatedAt: new Date()
-          };
+        runSowingAnimation(chosenPit, 'player2', board).then(() => {
+          setOfflineRoom(prev => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              board: nextBoard,
+              turn: nextTurn,
+              status: gameOver ? 'completed' : 'playing',
+              winnerId,
+              lastMove: {
+                player: 'player2',
+                pitIndex: chosenPit,
+                timestamp: Date.now()
+              },
+              updatedAt: new Date()
+            };
+          });
+          botThinkingRef.current = false;
+          setBotIsThinking(false);
         });
+      } else {
+        botThinkingRef.current = false;
+        setBotIsThinking(false);
       }
-
-      botThinkingRef.current = false;
-      setBotIsThinking(false);
     }, 1200);
 
     return () => clearTimeout(thinkingTimer);
-  }, [offlineRoom, gameMode]);
+  }, [offlineRoom, gameMode, isSowing]);
 
   const role = getPlayerRole(activeRoom || { player1Id: '', player2Id: '', status: 'lobby' } as any);
   const isP1 = role === 'player1';
@@ -891,7 +1020,14 @@ export default function GameBoard({
 
             {/* LAYOUT: Player 2 Store (Hazine) - index 13 */}
             {/* Visual LEFT end for Player 1 perspective or Top on mobile */}
-            <div className="flex flex-row md:flex-col md:w-36 w-full h-16 sm:h-20 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-xl md:rounded-2xl p-3 items-center justify-between text-center relative border border-amber-950/40 gap-2">
+            <div className={`flex flex-row md:flex-col md:w-36 w-full h-16 sm:h-20 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-xl md:rounded-2xl p-3 items-center justify-between text-center relative border gap-2 transition-all duration-300 ${
+              animatingPit === 13 
+                ? 'border-indigo-400 ring-4 ring-indigo-500/50 bg-[#542406] scale-102 z-10' 
+                : 'border-amber-950/40'
+            }`}>
+              {animatingPit === 13 && (
+                <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
+              )}
               <span className="text-[9px] md:text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono text-left md:text-center shrink-0">
                 {activeRoom.player2Name}'in Haznesi
               </span>
@@ -899,12 +1035,12 @@ export default function GameBoard({
               {/* Stones area */}
               <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[24px]">
                 <div className="absolute inset-0 flex items-center justify-center scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
-                  {renderStones(activeRoom.board[13])}
+                  {renderStones(displayBoard ? displayBoard[13] : activeRoom.board[13])}
                 </div>
               </div>
 
               <div className="font-mono text-xl md:text-3xl font-extrabold text-indigo-400 drop-shadow shadow-indigo-950 pb-0.5 px-1 shrink-0">
-                {activeRoom.board[13]}
+                {displayBoard ? displayBoard[13] : activeRoom.board[13]}
               </div>
             </div>
 
@@ -914,24 +1050,31 @@ export default function GameBoard({
               {/* TOP ROW: Player 2 pits (Indices: 12, 11, 10, 9, 8, 7) */}
               <div className="grid grid-cols-6 gap-1.5 sm:gap-3 md:gap-4">
                 {[12, 11, 10, 9, 8, 7].map((idx) => {
-                  const seeds = activeRoom.board[idx];
-                  const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 && isP2;
+                  const seeds = displayBoard ? displayBoard[idx] : activeRoom.board[idx];
+                  const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 && isP2 && !isSowing;
                   
                   return (
                     <button
                       key={idx}
                       onClick={() => clickable && handlePitClick(idx)}
                       disabled={!clickable}
-                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1.5 sm:p-2 relative transition-all duration-300 border border-amber-950/20 ${
+                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1.5 sm:p-2 relative transition-all duration-300 border ${
+                        idx === animatingPit
+                          ? 'border-indigo-400 ring-4 ring-indigo-500/50 bg-[#5e2604] scale-105 z-10'
+                          : 'border-amber-950/20'
+                      } ${
                         clickable 
-                          ? 'hover:bg-[#5a2504] cursor-pointer' 
+                          ? 'hover:bg-[#5a2504] cursor-pointer hover:ring-2 hover:ring-indigo-500/40' 
                           : 'cursor-not-allowed opacity-90'
                       } ${
-                        activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 
+                        activeRoom.status === 'playing' && activeRoom.turn === 'player2' && seeds > 0 && !isSowing
                           ? 'ring-1 ring-indigo-500/30' 
                           : ''
                       }`}
                     >
+                      {idx === animatingPit && (
+                        <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-indigo-400 animate-ping opacity-75 pointer-events-none" />
+                      )}
                       <span className="text-[8px] md:text-[9px] font-bold font-mono text-indigo-400 absolute top-1 md:top-1.5 left-1 md:left-2">
                         {13 - idx}
                       </span>
@@ -954,20 +1097,27 @@ export default function GameBoard({
               {/* BOTTOM ROW: Player 1 pits (Indices: 0, 1, 2, 3, 4, 5) */}
               <div className="grid grid-cols-6 gap-1.5 sm:gap-3 md:gap-4">
                 {[0, 1, 2, 3, 4, 5].map((idx) => {
-                  const seeds = activeRoom.board[idx];
-                  const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player1' && seeds > 0 && isP1;
+                  const seeds = displayBoard ? displayBoard[idx] : activeRoom.board[idx];
+                  const clickable = activeRoom.status === 'playing' && activeRoom.turn === 'player1' && seeds > 0 && isP1 && !isSowing;
                   
                   return (
                     <button
                       key={idx}
                       onClick={() => clickable && handlePitClick(idx)}
                       disabled={!clickable}
-                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1.5 sm:p-2 relative transition-all duration-300 border border-amber-950/20 ${
+                      className={`h-16 xs:h-20 sm:h-24 md:h-32 bg-[#4c1f03] pit-bezel rounded-xl md:rounded-2xl flex flex-col items-center justify-between p-1.5 sm:p-2 relative transition-all duration-300 border ${
+                        idx === animatingPit
+                          ? 'border-amber-400 ring-4 ring-amber-500/50 bg-[#5e2604] scale-105 z-10'
+                          : 'border-amber-950/20'
+                      } ${
                         clickable 
-                          ? 'hover:bg-[#5a2504] cursor-pointer ring-1 ring-amber-500/40 active-turn-glow' 
+                          ? 'hover:bg-[#5a2504] cursor-pointer ring-1 ring-amber-500/40 hover:ring-2 hover:ring-amber-500 active-turn-glow' 
                           : 'cursor-not-allowed opacity-90'
                       }`}
                     >
+                      {idx === animatingPit && (
+                        <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
+                      )}
                       <span className="text-[8px] md:text-[9px] font-bold font-mono text-amber-500 absolute top-1 md:top-1.5 left-1 md:left-2">
                         {idx + 1}
                       </span>
@@ -990,7 +1140,14 @@ export default function GameBoard({
 
             {/* LAYOUT: Player 1 Store (Hazine) - index 6 */}
             {/* Visual RIGHT end for Player 1 perspective or Bottom on mobile */}
-            <div className="flex flex-row md:flex-col md:w-36 w-full h-16 sm:h-20 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-xl md:rounded-2xl p-3 items-center justify-between text-center relative border border-amber-950/40 gap-2">
+            <div className={`flex flex-row md:flex-col md:w-36 w-full h-16 sm:h-20 md:h-80 shrink-0 bg-[#451e05] pit-bezel rounded-xl md:rounded-2xl p-3 items-center justify-between text-center relative border gap-2 transition-all duration-300 ${
+              animatingPit === 6 
+                ? 'border-amber-400 ring-4 ring-amber-500/50 bg-[#542406] scale-102 z-10' 
+                : 'border-amber-950/40'
+            }`}>
+              {animatingPit === 6 && (
+                <span className="absolute inset-0 rounded-xl md:rounded-2xl border-4 border-amber-400 animate-ping opacity-75 pointer-events-none" />
+              )}
               <span className="text-[9px] md:text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono text-left md:text-center shrink-0">
                 {activeRoom.player1Name}'in Haznesi
               </span>
@@ -998,12 +1155,12 @@ export default function GameBoard({
               {/* Stones area */}
               <div className="flex-1 w-full relative overflow-hidden flex items-center justify-center min-h-[24px]">
                 <div className="absolute inset-0 flex items-center justify-center scale-75 sm:scale-95 md:scale-100 transform origin-center transition-transform">
-                  {renderStones(activeRoom.board[6])}
+                  {renderStones(displayBoard ? displayBoard[6] : activeRoom.board[6])}
                 </div>
               </div>
 
               <div className="font-mono text-xl md:text-3xl font-extrabold text-amber-500 drop-shadow shadow-amber-950 pb-0.5 px-1 shrink-0">
-                {activeRoom.board[6]}
+                {displayBoard ? displayBoard[6] : activeRoom.board[6]}
               </div>
             </div>
 
