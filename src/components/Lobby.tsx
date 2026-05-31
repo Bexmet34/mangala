@@ -105,9 +105,29 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout }: Lobb
       onSelectGame(code, 'multiplayer');
     } catch (err: any) {
       console.error(err);
-      setError(err instanceof Error && err.message.includes('bulunamadı') 
-        ? 'Girdiğiniz kodla eşleşen aktif bir oyun odası bulunamadı!' 
-        : err.message || 'Odaya katılım başarısız oldu.');
+      let errMsg = 'Odaya katılım başarısız oldu.';
+      if (err instanceof Error) {
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed && typeof parsed === 'object' && parsed.error) {
+            errMsg = parsed.error;
+          } else {
+            errMsg = err.message;
+          }
+        } catch {
+          errMsg = err.message;
+        }
+      } else if (typeof err === 'string') {
+        errMsg = err;
+      }
+
+      if (errMsg.includes('bulunamadı')) {
+        setError('Girdiğiniz kodla eşleşen aktif bir oyun odası bulunamadı!');
+      } else if (errMsg.includes('dolu')) {
+        setError('Bu oyun odası dolu!');
+      } else {
+        setError(errMsg);
+      }
     } finally {
       setLoading(false);
     }
