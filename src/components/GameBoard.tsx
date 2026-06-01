@@ -16,7 +16,8 @@ import {
   sendEmote,
   submitDisconnect,
   submitReconnect,
-  checkAbandonGame
+  checkAbandonGame,
+  getUserProfile
 } from '../firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { GameRoom, PlayerRole, GameMove } from '../types';
@@ -439,7 +440,7 @@ interface GameBoardProps {
   gameMode: 'multiplayer' | 'singleplayer';
   currUserId: string;
   currUserName: string;
-  userProfile?: any;
+  initialUserProfile?: any;
   onBackToLobby: () => void;
 }
 
@@ -448,9 +449,21 @@ export default function GameBoard({
   gameMode, 
   currUserId, 
   currUserName, 
-  userProfile,
+  initialUserProfile,
   onBackToLobby 
 }: GameBoardProps) {
+  const [userProfile, setUserProfile] = useState(initialUserProfile);
+
+  useEffect(() => {
+    const fetchFreshProfile = async () => {
+      if (currUserId) {
+        const fresh = await getUserProfile(currUserId);
+        if (fresh) setUserProfile(fresh);
+      }
+    };
+    fetchFreshProfile();
+  }, [currUserId]);
+
   const [room, setRoom] = useState<GameRoom | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

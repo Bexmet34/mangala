@@ -45,7 +45,7 @@ export default function App() {
             name: profile.name,
             isAnonymous: currentUser.isAnonymous
           });
-        } catch (e) {
+        } catch (e: any) {
           console.error("Profile sync error, falling back locally:", e);
           const localName = localStorage.getItem('mangala_nickname');
           const defaultName = `Oyuncu_${currentUser.uid.substring(0, 4)}`;
@@ -164,7 +164,7 @@ export default function App() {
                 gameMode={gameMode!} 
                 currUserId={user.uid} 
                 currUserName={user.name}
-                userProfile={fullProfile}
+                initialUserProfile={fullProfile}
                 onBackToLobby={handleBackToLobby}
               />
             </motion.div>
