@@ -33,6 +33,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import MarketView from './MarketView';
 
 interface LobbyProps {
   userId: string;
@@ -62,7 +63,7 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
   const [leaderboard, setLeaderboard] = useState<UserProfile[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
   const [activeTab, setActiveTab] = useState<'rooms' | 'leaderboard'>('rooms');
-  const [currentView, setCurrentView] = useState<'play' | 'leaderboard'>('play');
+  const [currentView, setCurrentView] = useState<'play' | 'leaderboard' | 'market'>('play');
   const [leaderboardSearch, setLeaderboardSearch] = useState('');
 
   const fetchRooms = async () => {
@@ -143,6 +144,24 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
       console.error(err);
       setError('Oyun odası oluşturulamadı. Lütfen tekrar deneyin.');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuickPlay = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { findMatchmakingRoom } = await import('../firebase');
+      const roomId = await findMatchmakingRoom();
+      if (roomId) {
+        await handleJoinRoom(roomId);
+      } else {
+        await handleCreateRoom();
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError('Eşleştirme sırasında bir hata oluştu.');
       setLoading(false);
     }
   };
@@ -328,7 +347,18 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
           }`}
         >
           <Trophy className="w-5 h-5 text-amber-500" />
-          <span>Global Skor Tahtası</span>
+          <span className="hidden sm:inline">Skor Tahtası</span>
+        </button>
+        <button
+          onClick={() => setCurrentView('market')}
+          className={`flex-1 flex items-center justify-center gap-2.5 py-3 rounded-xl text-sm font-extrabold transition cursor-pointer ${
+            currentView === 'market' 
+              ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-md shadow-black/20' 
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+          }`}
+        >
+          <span className="text-xl">🏪</span>
+          <span className="hidden sm:inline">Market & Görevler</span>
         </button>
       </div>
 
@@ -363,6 +393,25 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
                     </button>
                   </div>
                 )}
+
+                {/* Quick Play Matchmaking */}
+                <button
+                  onClick={handleQuickPlay}
+                  disabled={loading}
+                  className="w-full relative overflow-hidden group flex items-center justify-center gap-2 px-5 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl shadow-lg transition duration-250 active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 relative z-10 text-lg">
+                    <Gamepad2 className="w-6 h-6" />
+                    Hemen Oyna (Rastgele Eşleşme)
+                  </div>
+                  <div className="absolute inset-0 w-full h-full bg-white/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-slate-700"></div>
+                  <span className="text-xs text-slate-500 uppercase font-bold tracking-widest">VEYA</span>
+                  <div className="h-px flex-1 bg-slate-700"></div>
+                </div>
 
                 {/* Create Room Button */}
                 <button
@@ -489,7 +538,7 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
               </motion.div>
             </div>
           </motion.div>
-        ) : (
+        ) : currentView === 'leaderboard' ? (
           /* Separate / Dedicated Glorious Skorboard View */
           <motion.div 
             key="leaderboard-view"
@@ -692,7 +741,9 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
               )}
             </div>
           </motion.div>
-        )}
+        ) : currentView === 'market' ? (
+          <MarketView profile={profile} onProfileUpdate={fetchProfile} />
+        ) : null}
       </AnimatePresence>
 
       {/* Profile Modal */}

@@ -12,7 +12,11 @@ import {
   leaveGameRoom,
   auth,
   db,
-  awardPoints
+  awardPoints,
+  sendEmote,
+  submitDisconnect,
+  submitReconnect,
+  checkAbandonGame
 } from '../firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { GameRoom, PlayerRole, GameMove } from '../types';
@@ -429,14 +433,40 @@ interface GameBoardProps {
   gameMode: 'multiplayer' | 'singleplayer';
   currUserId: string;
   currUserName: string;
+  userProfile?: any;
   onBackToLobby: () => void;
 }
+
+const BOARDS: any = {
+  classic: { id: 'classic', name: 'Klasik', price: 0, themeClass: 'bg-gradient-to-b from-amber-800 to-amber-900 border-amber-950' },
+  marble: { id: 'marble', name: 'Mermer', price: 100, themeClass: 'bg-gradient-to-b from-slate-200 to-slate-300 border-slate-400' },
+  mahogany: { id: 'mahogany', name: 'Maun Ağacı', price: 250, themeClass: 'bg-gradient-to-b from-red-900 to-stone-900 border-red-950' },
+  space: { id: 'space', name: 'Kozmik Uzay', price: 500, themeClass: 'bg-gradient-to-b from-indigo-900 to-slate-900 border-indigo-950 shadow-[0_0_15px_rgba(99,102,241,0.5)]' },
+};
+
+const STONES: any = {
+  classic: { id: 'classic', style: { background: 'linear-gradient(135deg, #a3e635, #4d7c0f)' } },
+  gold: { id: 'gold', style: { background: 'linear-gradient(135deg, #fef08a, #ca8a04)' } },
+  sapphire: { id: 'sapphire', style: { background: 'linear-gradient(135deg, #93c5fd, #1d4ed8)' } },
+  ruby: { id: 'ruby', style: { background: 'linear-gradient(135deg, #fca5a5, #b91c1c)' } },
+  obsidian: { id: 'obsidian', style: { background: 'linear-gradient(135deg, #475569, #0f172a)' } },
+};
+
+const EMOTES = [
+  { id: 'clap', emoji: '👏', label: 'Tebrikler' },
+  { id: 'cry', emoji: '😢', label: 'Ah be!' },
+  { id: 'angry', emoji: '😡', label: 'Kızgın' },
+  { id: 'party', emoji: '🎉', label: 'Şahane' },
+  { id: 'mindblown', emoji: '🤯', label: 'Zekice!' },
+  { id: 'think', emoji: '🤔', label: 'Düşünüyorum...' },
+];
 
 export default function GameBoard({ 
   roomId, 
   gameMode, 
   currUserId, 
   currUserName, 
+  userProfile,
   onBackToLobby 
 }: GameBoardProps) {
   const [room, setRoom] = useState<GameRoom | null>(null);
@@ -446,11 +476,22 @@ export default function GameBoard({
   const [logMessage, setLogMessage] = useState<string>('Oyun başladı! Hamle bekleniyor.');
   const [botIsThinking, setBotIsThinking] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
+  const [showEmoteMenu, setShowEmoteMenu] = useState(false);
+  const [activeEmoteP1, setActiveEmoteP1] = useState<{ emoji: string, id: number } | null>(null);
+  const [activeEmoteP2, setActiveEmoteP2] = useState<{ emoji: string, id: number } | null>(null);
 
   // Sowing Animation states
   const [displayBoard, setDisplayBoard] = useState<number[] | null>(null);
   const [animatingPit, setAnimatingPit] = useState<number | null>(null);
   const [isSowing, setIsSowing] = useState(false);
+
+  const boardTheme = userProfile?.equippedBoard && BOARDS[userProfile.equippedBoard] 
+    ? BOARDS[userProfile.equippedBoard] 
+    : BOARDS['classic'];
+    
+  const stoneTheme = userProfile?.equippedStone && STONES[userProfile.equippedStone]
+    ? STONES[userProfile.equippedStone]
+    : STONES['classic'];
 
   // Sound sync variables
   const prevBoardRef = useRef<number[] | null>(null);
@@ -790,6 +831,66 @@ export default function GameBoard({
 
   }, [activeRoom?.status, activeRoom?.winnerId, currUserId, gameMode, activeRoom?.id]);
 
+  // Online / Offline tracking
+  useEffect(() => {
+    if (gameMode === 'singleplayer' || !activeRoom) return;
+    
+    let isDisposed = false;
+
+    const handleOffline = () => {
+      if (!isDisposed && (activeRoom.status === 'playing' || activeRoom.status === 'lobby')) {
+        const role = currUserId === activeRoom.player1Id ? 'player1' : 'player2';
+        submitDisconnect(roomId, role, activeRoom);
+      }
+    };
+
+    const handleOnline = () => {
+      if (!isDisposed && (activeRoom.status === 'p1_disconnected' || activeRoom.status === 'p2_disconnected')) {
+        submitReconnect(roomId);
+      }
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      isDisposed = true;
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [gameMode, activeRoom, roomId, currUserId]);
+
+  // Emote listener
+  useEffect(() => {
+    if (!activeRoom || !activeRoom.latestEmote) return;
+    const { senderId, emoteId, timestamp } = activeRoom.latestEmote;
+    
+    // Only show if recent (last 10s)
+    if (Date.now() - timestamp < 10000) {
+      const emoteObj = EMOTES.find(e => e.id === emoteId);
+      if (!emoteObj) return;
+
+      if (senderId === activeRoom.player1Id) {
+        setActiveEmoteP1({ emoji: emoteObj.emoji, id: timestamp });
+        setTimeout(() => setActiveEmoteP1(null), 3000);
+      } else {
+        setActiveEmoteP2({ emoji: emoteObj.emoji, id: timestamp });
+        setTimeout(() => setActiveEmoteP2(null), 3000);
+      }
+    }
+  }, [activeRoom?.latestEmote]);
+
+  // Check abandon state loop
+  useEffect(() => {
+    if (gameMode === 'singleplayer' || !activeRoom) return;
+    const interval = setInterval(() => {
+      if (activeRoom.status === 'p1_disconnected' || activeRoom.status === 'p2_disconnected') {
+        checkAbandonGame(roomId, activeRoom);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [gameMode, activeRoom, roomId]);
+
   // 2. Play Turn (Human)
   const handlePitClick = async (pitIndex: number) => {
     if (!activeRoom) return;
@@ -985,6 +1086,9 @@ export default function GameBoard({
   const bottomPlayerColor = isP2 ? 'text-indigo-400' : 'text-amber-500';
   const bottomPlayerActive = activeRoom?.status === 'playing' && activeRoom?.turn === (isP2 ? 'player2' : 'player1');
 
+  const topPlayerEmote = isP2 ? activeEmoteP1 : activeEmoteP2;
+  const bottomPlayerEmote = isP2 ? activeEmoteP2 : activeEmoteP1;
+
   // Reset timer on turn / board changes
   useEffect(() => {
     if (!activeRoom || activeRoom.status !== 'playing') return;
@@ -1106,7 +1210,6 @@ export default function GameBoard({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Marble renderer
   const renderStones = (count: number) => {
     return Array.from({ length: count }).map((_, i) => {
       const angle = (i * 137.5) * (Math.PI / 180); // golden spiral
@@ -1114,20 +1217,29 @@ export default function GameBoard({
       const x = Math.cos(angle) * radius;
       const y = Math.sin(angle) * radius;
       
-      const colors = [
-        'bg-[#14b8a6] border-[#2dd4bf]', // cyan/turquoise
-        'bg-[#64748b] border-[#94a3b8]', // deep slate
-        'bg-[#cbd5e1] border-[#f1f5f9]', // smooth light
-        'bg-[#f59e0b] border-[#fbbf24]', // glowing amber
-        'bg-[#f97316] border-[#fb923c]'  // orange copper
-      ];
-      const colorClass = colors[i % colors.length];
+      // We will merge standard structure with stoneTheme styles
+      let colorClass = 'border transition-all duration-300';
+      
+      // Fallback colors for classic if no global single color is defined
+      if (stoneTheme.id === 'classic') {
+          const colors = [
+            'bg-[#14b8a6] border-[#2dd4bf]', // cyan/turquoise
+            'bg-[#64748b] border-[#94a3b8]', // deep slate
+            'bg-[#cbd5e1] border-[#f1f5f9]', // smooth light
+            'bg-[#f59e0b] border-[#fbbf24]', // glowing amber
+            'bg-[#f97316] border-[#fb923c]'  // orange copper
+          ];
+          colorClass += ' ' + colors[i % colors.length];
+      } else {
+          colorClass += ' shadow-[inset_0_-2px_4px_rgba(0,0,0,0.4)]';
+      }
 
       return (
         <span
           key={i}
-          className={`w-3.5 h-3.5 rounded-full border shadow-inner absolute ${colorClass} transition-all duration-300`}
+          className={`w-3.5 h-3.5 rounded-full absolute ${colorClass}`}
           style={{
+            ...(stoneTheme.id !== 'classic' ? stoneTheme.style : {}),
             transform: `translate(${x}px, ${y}px)`,
             top: 'calc(50% - 7px)',
             left: 'calc(50% - 7px)',
@@ -1282,7 +1394,7 @@ export default function GameBoard({
       )}
 
       {/* Main active game view */}
-      {(activeRoom.status === 'playing' || activeRoom.status === 'completed' || activeRoom.status === 'abandoned') && (
+      {(activeRoom.status === 'playing' || activeRoom.status === 'completed' || activeRoom.status === 'abandoned' || activeRoom.status === 'p1_disconnected' || activeRoom.status === 'p2_disconnected') && (
         <div className="flex flex-col gap-6">
 
           {/* Action Log Ticker & Turn State Banner */}
@@ -1333,6 +1445,11 @@ export default function GameBoard({
                       : (activeRoom.turn === 'player1' ? activeRoom.player1Name : activeRoom.player2Name)}
                   </div>
                 </>
+              ) : activeRoom.status === 'p1_disconnected' || activeRoom.status === 'p2_disconnected' ? (
+                <div className="flex items-center gap-2 px-4 py-1.5 bg-red-950/60 border border-red-800/80 text-red-300 font-bold rounded-lg text-[10px] sm:text-xs uppercase text-center animate-pulse">
+                  <Flame className="w-3.5 h-3.5" />
+                  Bağlantı Koptu (Reconnection Window: 60s)
+                </div>
               ) : (
                 <div className="px-4 py-1 bg-red-950/40 border border-red-800 text-red-200 font-bold rounded-lg text-xs uppercase text-center">
                   OYUN TAMAMLANDI
@@ -1342,7 +1459,7 @@ export default function GameBoard({
           </div>
 
           {/* Opponent / Top player info (Visual Top Row) */}
-          <div className="flex justify-between items-center px-4">
+          <div className="flex justify-between items-center px-4 relative">
             <div className="flex items-center gap-2">
               <span className={`text-xs font-bold ${topPlayerColor} tracking-wider font-mono`}>{topPlayerLabel}</span>
               <h4 className="text-md font-bold text-slate-200">
@@ -1354,6 +1471,18 @@ export default function GameBoard({
                 </span>
               )}
             </div>
+            {topPlayerEmote && (
+              <motion.div
+                key={topPlayerEmote.id}
+                initial={{ opacity: 0, scale: 0.5, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                className="absolute left-32 top-full mt-2 z-50 bg-slate-800 border border-slate-600 rounded-2xl px-4 py-2 shadow-2xl text-2xl"
+              >
+                {topPlayerEmote.emoji}
+                <div className="absolute -top-2 left-4 w-4 h-4 bg-slate-800 border-l border-t border-slate-600 rotate-45"></div>
+              </motion.div>
+            )}
             {topPlayerActive && (
               <span className={`text-xs ${topPlayerColor} flex items-center gap-2 animate-pulse bg-slate-900/40 border border-slate-800 px-3 py-1 rounded-lg`}>
                 <Flame className="w-3.5 h-3.5" />
@@ -1363,7 +1492,7 @@ export default function GameBoard({
           </div>
 
           {/* PHYSICAL WOODEN BOARD - THE HEARTS OF THE GAME */}
-          <div className="wood-grain wood-bezel w-full rounded-2xl md:rounded-3xl p-1.5 xs:p-2 sm:p-3 md:p-8 flex flex-row relative gap-1.5 xs:gap-2 sm:gap-3 md:gap-4 border border-[#4d2106] select-none shadow-2xl items-center">
+          <div className={`wood-grain wood-bezel ${boardTheme.themeClass} w-full rounded-2xl md:rounded-3xl p-1.5 xs:p-2 sm:p-3 md:p-8 flex flex-row relative gap-1.5 xs:gap-2 sm:gap-3 md:gap-4 border select-none shadow-2xl items-center`}>
             {/* Small decorative corner rivets */}
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute top-3 left-3 border border-zinc-950 opacity-40 shadow" />
             <div className="hidden md:block w-3 h-3 bg-zinc-800 rounded-full absolute top-3 right-3 border border-zinc-950 opacity-40 shadow" />
@@ -1529,19 +1658,68 @@ export default function GameBoard({
           </div>
  
           {/* Bottom player info (Visual Bottom Row) */}
-          <div className="flex justify-between items-center px-4 bg-slate-900/40 border border-slate-750/30 p-2.5 rounded-xl">
+          <div className="flex justify-between items-center px-4 bg-slate-900/40 border border-slate-750/30 p-2.5 rounded-xl relative">
             <div className="flex items-center gap-2">
               <span className={`text-xs font-bold ${bottomPlayerColor} tracking-wider font-mono`}>{bottomPlayerLabel}</span>
               <h4 className="text-md font-bold text-slate-200">
                 {bottomPlayerName} {!isSpectator && '(Siz)'}
               </h4>
             </div>
-            {bottomPlayerActive && (
-              <span className={`text-xs ${bottomPlayerColor} flex items-center gap-2 animate-pulse bg-slate-900/40 border border-slate-850 px-3 py-1 rounded-lg font-semibold`}>
-                <Flame className="w-3.5 h-3.5" />
-                Hamle Yapmanız Bekleniyor...
-              </span>
+            {bottomPlayerEmote && (
+              <motion.div
+                key={bottomPlayerEmote.id}
+                initial={{ opacity: 0, scale: 0.5, y: -10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                className="absolute left-32 bottom-full mb-2 z-50 bg-slate-800 border border-slate-600 rounded-2xl px-4 py-2 shadow-2xl text-2xl"
+              >
+                {bottomPlayerEmote.emoji}
+                <div className="absolute -bottom-2 left-4 w-4 h-4 bg-slate-800 border-l border-b border-slate-600 -rotate-45"></div>
+              </motion.div>
             )}
+            
+            <div className="flex items-center gap-3">
+              {!isSpectator && activeRoom.status === 'playing' && gameMode === 'multiplayer' && (
+                <div className="relative">
+                  <button 
+                    onClick={() => setShowEmoteMenu(!showEmoteMenu)}
+                    className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 transition"
+                  >
+                    😀
+                  </button>
+                  <AnimatePresence>
+                    {showEmoteMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        className="absolute bottom-full right-0 mb-3 bg-slate-800 border border-slate-700 rounded-xl p-2 flex gap-2 shadow-2xl z-50"
+                      >
+                        {EMOTES.map(e => (
+                          <button
+                            key={e.id}
+                            onClick={() => {
+                              sendEmote(roomId, e.id, currUserId);
+                              setShowEmoteMenu(false);
+                            }}
+                            className="p-2 hover:bg-slate-700 rounded-lg text-xl transition"
+                            title={e.label}
+                          >
+                            {e.emoji}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+              {bottomPlayerActive && (
+                <span className={`text-xs ${bottomPlayerColor} flex items-center gap-2 animate-pulse bg-slate-900/40 border border-slate-850 px-3 py-1 rounded-lg font-semibold hidden sm:flex`}>
+                  <Flame className="w-3.5 h-3.5" />
+                  Hamle Yapmanız Bekleniyor...
+                </span>
+              )}
+            </div>
           </div>
 
         </div>

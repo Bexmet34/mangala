@@ -131,6 +131,26 @@ export async function testConnection() {
 
 const GAMES_COLLECTION = 'games';
 
+export async function findMatchmakingRoom(): Promise<string | null> {
+  const path = GAMES_COLLECTION;
+  try {
+    const q = query(
+      collection(db, GAMES_COLLECTION),
+      where('status', '==', 'lobby'),
+      where('player2Id', '==', null),
+      limit(1) // Avoid orderBy to avoid requiring a composite index right away
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs[0].id;
+    }
+    return null;
+  } catch (error) {
+    console.error("Matchmaking error", error);
+    return null;
+  }
+}
+
 /**
  * Creates a new game room
  */
@@ -385,7 +405,18 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   try {
     const snap = await getDoc(doc(db, USERS_COLLECTION, userId));
     if (snap.exists()) {
-      return snap.data() as UserProfile;
+      const data = snap.data() as UserProfile;
+      // Retrofit for old profiles lacking new fields
+      if (data.coins === undefined) {
+        data.coins = 0;
+        data.unlockedBoards = ['classic'];
+        data.unlockedStones = ['classic'];
+        data.equippedBoard = 'classic';
+        data.equippedStone = 'classic';
+        data.dailyQuests = [];
+        data.lastQuestDate = '';
+      }
+      return data;
     }
     return null;
   } catch (error) {
@@ -405,6 +436,13 @@ export async function createUserProfile(userId: string, name: string, isAnonymou
     score: 0,
     gamesWon: 0,
     gamesPlayed: 0,
+    coins: 0,
+    unlockedBoards: ['classic'],
+    unlockedStones: ['classic'],
+    equippedBoard: 'classic',
+    equippedStone: 'classic',
+    dailyQuests: [],
+    lastQuestDate: '',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   };
@@ -488,6 +526,7 @@ export async function awardPoints(
 
       await updateDoc(userRef, {
         score: oldScore + scoreToAward,
+        coins: (data.coins || 0) + scoreToAward * 2, // Coins = points * 2
         gamesPlayed: (data.gamesPlayed || 0) + 1,
         gamesWon: (data.gamesWon || 0) + (won ? 1 : 0),
         updatedAt: serverTimestamp()
@@ -524,6 +563,59 @@ export async function awardPoints(
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
     throw error;
+  }
+}
+
+export async function sendEmote(roomId: string, emoteId: string, senderId: string): Promise<void> {
+  try {
+    const roomRef = doc(db, GAMES_COLLECTION, roomId);
+    await updateDoc(roomRef, {
+      latestEmote: {
+        emoteId,
+        senderId,
+        timestamp: Date.now()
+      }
+    });
+  } catch (error) {
+    console.error("Failed to send emote", error);
+  }
+}
+
+export async function submitDisconnect(roomId: string, role: PlayerRole, currentRoom: GameRoom): Promise<void> {
+  const roomRef = doc(db, GAMES_COLLECTION, roomId);
+  const statusToSet = role === 'player1' ? 'p1_disconnected' : 'p2_disconnected';
+  try {
+    await updateDoc(roomRef, {
+      status: statusToSet,
+      disconnectTimestamp: Date.now(),
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error("Disconnect error", error);
+  }
+}
+
+export async function submitReconnect(roomId: string): Promise<void> {
+  const roomRef = doc(db, GAMES_COLLECTION, roomId);
+  try {
+    await updateDoc(roomRef, {
+      status: 'playing',
+      disconnectTimestamp: null,
+      updatedAt: serverTimestamp()
+    });
+  } catch(error) {
+    console.error("Reconnect error", error);
+  }
+}
+
+export async function checkAbandonGame(roomId: string, currentRoom: GameRoom): Promise<void> {
+  const now = Date.now();
+  if (currentRoom.disconnectTimestamp && now - currentRoom.disconnectTimestamp > 60000) {
+    if (currentRoom.status === 'p1_disconnected') {
+      await updateDoc(doc(db, GAMES_COLLECTION, roomId), { status: 'abandoned', winnerId: currentRoom.player2Id });
+    } else if (currentRoom.status === 'p2_disconnected') {
+      await updateDoc(doc(db, GAMES_COLLECTION, roomId), { status: 'abandoned', winnerId: currentRoom.player1Id });
+    }
   }
 }
 

@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
   const [user, setUser] = useState<{ uid: string; name: string; isAnonymous: boolean } | null>(null);
+  const [fullProfile, setFullProfile] = useState<any>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [gameMode, setGameMode] = useState<'multiplayer' | 'singleplayer' | null>(null);
@@ -37,6 +38,7 @@ export default function App() {
             profile = await createUserProfile(currentUser.uid, defaultName, currentUser.isAnonymous);
           }
           
+          setFullProfile(profile);
           localStorage.setItem('mangala_nickname', profile.name);
           setUser({
             uid: currentUser.uid,
@@ -161,7 +163,8 @@ export default function App() {
                 roomId={activeRoomId} 
                 gameMode={gameMode!} 
                 currUserId={user.uid} 
-                currUserName={user.name} 
+                currUserName={user.name}
+                userProfile={fullProfile}
                 onBackToLobby={handleBackToLobby}
               />
             </motion.div>
