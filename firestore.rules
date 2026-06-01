@@ -176,7 +176,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read, get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
+      allow write: if isSignedIn() && userId == request.auth.uid;
     }
   }
 }
