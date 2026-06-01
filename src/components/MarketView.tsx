@@ -19,13 +19,14 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
   const currentCoins = profile.coins || 0;
 
   const handlePurchaseBoard = async (boardId: string, price: number) => {
-    if (currentCoins < price || profile.unlockedBoards.includes(boardId)) return;
+    const unlockedBoards = profile.unlockedBoards || ['classic'];
+    if (currentCoins < price || unlockedBoards.includes(boardId)) return;
     setBuying(boardId);
     try {
       const userRef = doc(db, 'users', profile.uid);
       await updateDoc(userRef, {
         coins: currentCoins - price,
-        unlockedBoards: [...profile.unlockedBoards, boardId],
+        unlockedBoards: [...unlockedBoards, boardId],
         equippedBoard: boardId,
         updatedAt: serverTimestamp()
       });
@@ -37,13 +38,14 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
   };
 
   const handlePurchaseStone = async (stoneId: string, price: number) => {
-    if (currentCoins < price || profile.unlockedStones.includes(stoneId)) return;
+    const unlockedStones = profile.unlockedStones || ['classic'];
+    if (currentCoins < price || unlockedStones.includes(stoneId)) return;
     setBuying(stoneId);
     try {
       const userRef = doc(db, 'users', profile.uid);
       await updateDoc(userRef, {
         coins: currentCoins - price,
-        unlockedStones: [...profile.unlockedStones, stoneId],
+        unlockedStones: [...unlockedStones, stoneId],
         equippedStone: stoneId,
         updatedAt: serverTimestamp()
       });
@@ -99,8 +101,9 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {Object.values(BOARDS).map((board: any) => {
-                  const isUnlocked = profile.unlockedBoards.includes(board.id);
-                  const isEquipped = profile.equippedBoard === board.id;
+                  const unlockedBoards = profile.unlockedBoards || ['classic'];
+                  const isUnlocked = unlockedBoards.includes(board.id);
+                  const isEquipped = profile.equippedBoard === board.id || (!profile.equippedBoard && board.id === 'classic');
                   
                   return (
                     <div key={board.id} className={`p-4 rounded-xl border flex flex-col gap-3 ${isEquipped ? 'bg-amber-500/10 border-amber-500/40 relative' : 'bg-slate-900/50 border-slate-700'}`}>
@@ -141,8 +144,9 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {Object.values(STONES).map((stone: any) => {
-                  const isUnlocked = profile.unlockedStones.includes(stone.id);
-                  const isEquipped = profile.equippedStone === stone.id;
+                  const unlockedStones = profile.unlockedStones || ['classic'];
+                  const isUnlocked = unlockedStones.includes(stone.id);
+                  const isEquipped = profile.equippedStone === stone.id || (!profile.equippedStone && stone.id === 'classic');
                   
                   return (
                     <div key={stone.id} className={`p-4 rounded-xl border flex flex-col gap-3 ${isEquipped ? 'bg-indigo-500/10 border-indigo-500/40 relative' : 'bg-slate-900/50 border-slate-700'}`}>
