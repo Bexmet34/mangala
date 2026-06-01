@@ -29,7 +29,16 @@ import {
   orderBy
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { GameRoom, PlayerRole, GameMove, UserProfile } from './types';
+import { GameRoom, PlayerRole, GameMove, UserProfile, DailyQuest } from './types';
+
+export function generateDailyQuests(): DailyQuest[] {
+  return [
+    { id: 'q1_' + Date.now(), type: 'play_games', target: 3, progress: 0, reward: 50, completed: false },
+    { id: 'q2_' + Date.now(), type: 'win_games', target: 1, progress: 0, reward: 100, completed: false },
+    { id: 'q3_' + Date.now(), type: 'double_move', target: 5, progress: 0, reward: 75, completed: false }
+  ];
+}
+
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -406,6 +415,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     const snap = await getDoc(doc(db, USERS_COLLECTION, userId));
     if (snap.exists()) {
       const data = snap.data() as UserProfile;
+      let needsUpdate = false;
       // Retrofit for old profiles lacking new fields
       if (data.coins === undefined) {
         data.coins = 0;
@@ -415,6 +425,27 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
         data.equippedStone = 'classic';
         data.dailyQuests = [];
         data.lastQuestDate = '';
+        needsUpdate = true;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      if (data.lastQuestDate !== today) {
+        data.lastQuestDate = today;
+        data.dailyQuests = generateDailyQuests();
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        await updateDoc(doc(db, USERS_COLLECTION, userId), {
+          coins: data.coins,
+          unlockedBoards: data.unlockedBoards,
+          unlockedStones: data.unlockedStones,
+          equippedBoard: data.equippedBoard,
+          equippedStone: data.equippedStone,
+          dailyQuests: data.dailyQuests,
+          lastQuestDate: data.lastQuestDate,
+          updatedAt: serverTimestamp()
+        });
       }
       return data;
     }
@@ -423,6 +454,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
+
 
 /**
  * Initializes a new user profile in Firestore
@@ -441,8 +473,8 @@ export async function createUserProfile(userId: string, name: string, isAnonymou
     unlockedStones: ['classic'],
     equippedBoard: 'classic',
     equippedStone: 'classic',
-    dailyQuests: [],
-    lastQuestDate: '',
+    dailyQuests: generateDailyQuests(),
+    lastQuestDate: new Date().toISOString().split('T')[0],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   };
@@ -548,6 +580,13 @@ export async function awardPoints(
         score: scoreToAward,
         gamesWon: won ? 1 : 0,
         gamesPlayed: 1,
+        coins: scoreToAward * 2,
+        unlockedBoards: ['classic'],
+        unlockedStones: ['classic'],
+        equippedBoard: 'classic',
+        equippedStone: 'classic',
+        dailyQuests: generateDailyQuests(),
+        lastQuestDate: new Date().toISOString().split('T')[0],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };

@@ -13,7 +13,7 @@ service cloud.firestore {
     }
 
     function isVerified() {
-      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'anonymous');
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'anonymous' || request.auth.token.firebase.sign_in_provider == null);
     }
 
     function isValidId(id) {
@@ -37,7 +37,14 @@ service cloud.firestore {
         && user.isAnonymous is bool
         && user.score is int
         && user.gamesWon is int
-        && user.gamesPlayed is int;
+        && user.gamesPlayed is int
+        && (user.coins == null || user.coins is int)
+        && (user.unlockedBoards == null || user.unlockedBoards is list)
+        && (user.unlockedStones == null || user.unlockedStones is list)
+        && (user.equippedBoard == null || (user.equippedBoard is string && user.equippedBoard.size() <= 100))
+        && (user.equippedStone == null || (user.equippedStone is string && user.equippedStone.size() <= 100))
+        && (user.dailyQuests == null || user.dailyQuests is list)
+        && (user.lastQuestDate == null || (user.lastQuestDate is string && user.lastQuestDate.size() <= 20));
     }
 
     function isValidGame(game) {
@@ -187,7 +194,7 @@ service cloud.firestore {
         && isValidUserProfile(incoming())
         && incoming().uid == userId
         && (incoming().createdAt == existing().createdAt || !incoming().keys().hasAll(['createdAt']))
-        && (incoming().updatedAt == request.time || incoming().updatedAt == null);
+        && (incoming().updatedAt == request.time || incoming().updatedAt == existing().updatedAt || incoming().updatedAt == null);
     }
   }
 }

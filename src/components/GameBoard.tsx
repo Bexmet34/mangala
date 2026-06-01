@@ -308,7 +308,10 @@ function evaluateBoardState(board: number[], isUnbeatable: boolean): number {
   return baseEval;
 }
 
-function getSmartMinimaxMove(board: number[], depth: number = 7, isUnbeatable: boolean = false): number {
+let totalMinimaxNodes = 0;
+const MAX_MINIMAX_NODES = 15000;
+
+function getSmartMinimaxMove(board: number[], depth: number = 6, isUnbeatable: boolean = false): number {
   const validPits: number[] = [];
   for (let idx = 7; idx <= 12; idx++) {
     if (board[idx] > 0) validPits.push(idx);
@@ -319,6 +322,7 @@ function getSmartMinimaxMove(board: number[], depth: number = 7, isUnbeatable: b
 
   let bestMove = -1;
   let bestScore = -Infinity;
+  totalMinimaxNodes = 0;
 
   // Move ordering for root speeds up pruning by testing lands-in-store first
   const sortedPits = [...validPits].sort((a, b) => {
@@ -335,7 +339,7 @@ function getSmartMinimaxMove(board: number[], depth: number = 7, isUnbeatable: b
     const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
     let score: number;
     if (nextTurn === 'player2') {
-      score = runMinimax(nextBoard, depth, -Infinity, Infinity, true, isUnbeatable);
+      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, true, isUnbeatable);
     } else {
       score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, false, isUnbeatable);
     }
@@ -357,10 +361,11 @@ function runMinimax(
   isMaximizing: boolean,
   isUnbeatable: boolean = false
 ): number {
+  totalMinimaxNodes++;
   const isP1Empty = board.slice(0, 6).every(val => val === 0);
   const isP2Empty = board.slice(7, 13).every(val => val === 0);
 
-  if (isP1Empty || isP2Empty || depth === 0) {
+  if (isP1Empty || isP2Empty || depth <= 0 || totalMinimaxNodes >= MAX_MINIMAX_NODES) {
     return evaluateBoardState(board, isUnbeatable);
   }
 
@@ -384,7 +389,7 @@ function runMinimax(
       const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
       let score: number;
       if (nextTurn === 'player2') {
-        score = runMinimax(nextBoard, depth, alpha, beta, true, isUnbeatable);
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, true, isUnbeatable);
       } else {
         score = runMinimax(nextBoard, depth - 1, alpha, beta, false, isUnbeatable);
       }
@@ -415,7 +420,7 @@ function runMinimax(
       const { nextBoard, nextTurn } = executeMove(board, pit, 'player1');
       let score: number;
       if (nextTurn === 'player1') {
-        score = runMinimax(nextBoard, depth, alpha, beta, false, isUnbeatable);
+        score = runMinimax(nextBoard, depth - 1, alpha, beta, false, isUnbeatable);
       } else {
         score = runMinimax(nextBoard, depth - 1, alpha, beta, true, isUnbeatable);
       }
@@ -986,8 +991,8 @@ export default function GameBoard({
       } else if (botDiff === 'hard') {
         chosenPit = getSmartMinimaxMove(board, 6, false);
       } else {
-        // unbeatable: Zor+ (11-depth search with hyper heuristics)
-        chosenPit = getSmartMinimaxMove(board, 11, true);
+        // unbeatable: Zor+ (8-depth search with hyper heuristics)
+        chosenPit = getSmartMinimaxMove(board, 8, true);
       }
 
       if (chosenPit !== -1) {

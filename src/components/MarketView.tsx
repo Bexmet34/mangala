@@ -59,7 +59,10 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
   const handleEquipBoard = async (boardId: string) => {
     try {
       const userRef = doc(db, 'users', profile.uid);
-      await updateDoc(userRef, { equippedBoard: boardId });
+      await updateDoc(userRef, { 
+        equippedBoard: boardId,
+        updatedAt: serverTimestamp()
+      });
       onProfileUpdate();
     } catch (err) { console.error(err); }
   };
@@ -67,7 +70,10 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
   const handleEquipStone = async (stoneId: string) => {
     try {
       const userRef = doc(db, 'users', profile.uid);
-      await updateDoc(userRef, { equippedStone: stoneId });
+      await updateDoc(userRef, { 
+        equippedStone: stoneId,
+        updatedAt: serverTimestamp()
+      });
       onProfileUpdate();
     } catch (err) { console.error(err); }
   };
@@ -79,11 +85,10 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.2 }}
-      className="grid grid-cols-1 md:grid-cols-12 gap-8"
+      className="space-y-6"
     >
-      <div className="md:col-span-8 space-y-6">
-        <div className="bg-slate-800/80 rounded-2xl border border-slate-700 p-6 shadow-xl">
-          <div className="flex items-center justify-between border-b border-slate-700 pb-4 mb-6">
+      <div className="bg-slate-800/80 rounded-2xl border border-slate-700 p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-700 pb-4 mb-6">
             <h3 className="text-xl font-bold text-white flex items-center gap-2">
               <ShoppingCart className="w-6 h-6 text-indigo-400" />
               Özelleştirme Marketi
@@ -183,41 +188,6 @@ export default function MarketView({ profile, onProfileUpdate }: MarketViewProps
               </div>
             </section>
           </div>
-        </div>
-      </div>
-
-      <div className="md:col-span-4">
-        <div className="bg-slate-800/80 rounded-2xl border border-slate-700 p-6 shadow-xl h-full">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-700 pb-4 mb-4">
-            <Flame className="w-5 h-5 text-orange-500" />
-            Günlük Görevler
-          </h3>
-          <div className="space-y-4">
-            {profile.dailyQuests?.map(q => (
-              <div key={q.id} className="bg-slate-900 border border-slate-750 p-4 rounded-xl flex flex-col gap-3 relative overflow-hidden">
-                {q.completed && <div className="absolute inset-0 bg-emerald-900/20 z-0"></div>}
-                <div className="flex justify-between gap-2 z-10">
-                  <p className={`text-sm font-semibold ${q.completed ? 'text-emerald-400' : 'text-slate-200'}`}>
-                    {q.type === 'win_games' && `${q.target} Oyun Kazan`}
-                    {q.type === 'play_games' && `${q.target} Oyun Oyna`}
-                    {q.type === 'beat_hard_bot' && `Zor Botu ${q.target} Kez Yen`}
-                    {q.type === 'double_move' && `Çifte Hamle Kuralını ${q.target} Kez Kullan`}
-                  </p>
-                  <span className="text-xs font-bold text-yellow-500 flex items-center gap-1 shrink-0"><Star className="w-3 h-3"/> {q.reward}</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2.5 z-10">
-                  <div className={`h-2.5 rounded-full ${q.completed ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(100, (q.progress / q.target) * 100)}%` }}></div>
-                </div>
-                <div className="text-[10px] text-slate-400 font-mono text-right z-10">
-                  {q.progress} / {q.target} {q.completed && '(Tamamlandı)'}
-                </div>
-              </div>
-            ))}
-            {(!profile.dailyQuests || profile.dailyQuests.length === 0) && (
-              <p className="text-slate-500 text-sm text-center py-8">Görevler yükleniyor veya hazır değil...</p>
-            )}
-          </div>
-        </div>
       </div>
     </motion.div>
   );

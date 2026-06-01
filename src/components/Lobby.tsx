@@ -30,7 +30,9 @@ import {
   Sparkles,
   Settings,
   TrendingUp,
-  ShieldCheck
+  ShieldCheck,
+  Flame,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import MarketView from './MarketView';
@@ -468,6 +470,46 @@ export default function Lobby({ userId, userName, onSelectGame, onLogout, onUpda
                   </div>
                 </div>
               </motion.div>
+
+              {/* Daily Quests Widget */}
+              {profile && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.15 }}
+                  className="bg-slate-800/80 rounded-2xl border border-slate-700 p-6 shadow-xl"
+                >
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-700 pb-3 mb-4">
+                    <Flame className="w-5 h-5 text-orange-500" />
+                    <span>Günlük Görevler</span>
+                  </h3>
+                  <div className="space-y-4">
+                    {profile.dailyQuests?.map(q => (
+                      <div key={q.id} className="bg-slate-900 border border-slate-750 p-4 rounded-xl flex flex-col gap-3 relative overflow-hidden">
+                        {q.completed && <div className="absolute inset-0 bg-emerald-900/20 z-0"></div>}
+                        <div className="flex justify-between gap-2 z-10">
+                          <p className={`text-sm font-semibold ${q.completed ? 'text-emerald-400' : 'text-slate-200'}`}>
+                            {q.type === 'win_games' && `${q.target} Oyun Kazan`}
+                            {q.type === 'play_games' && `${q.target} Oyun Oyna`}
+                            {q.type === 'beat_hard_bot' && `Zor Botu ${q.target} Kez Yen`}
+                            {q.type === 'double_move' && `Çifte Hamle Kuralını ${q.target} Kez Kullan`}
+                          </p>
+                          <span className="text-xs font-bold text-yellow-500 flex items-center gap-1 shrink-0"><Star className="w-3 h-3"/> {q.reward}</span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-2.5 z-10">
+                          <div className={`h-2.5 rounded-full ${q.completed ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(100, (q.progress / q.target) * 100)}%` }}></div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono text-right z-10">
+                          {q.progress} / {q.target} {q.completed && '(Tamamlandı)'}
+                        </div>
+                      </div>
+                    ))}
+                    {(!profile.dailyQuests || profile.dailyQuests.length === 0) && (
+                      <p className="text-slate-500 text-sm text-center py-4">Görevler yükleniyor veya hazır değil...</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
             </div>
 
             {/* Right column: Active Public Rooms */}
