@@ -41,9 +41,13 @@ export function generateDailyQuests(): DailyQuest[] {
 
 
 // Initialize Firebase
+if (!firebaseConfig || !firebaseConfig.apiKey) {
+  console.error("Firebase configuration missing or invalid!");
+}
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
+
 
 // Authentication services
 export const googleProvider = new GoogleAuthProvider();
