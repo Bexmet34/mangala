@@ -330,7 +330,7 @@ function getSmartMinimaxMove(board: number[], depth: number = 7, isUnbeatable: b
     const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
     let score: number;
     if (nextTurn === 'player2') {
-      score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, true, isUnbeatable);
+      score = runMinimax(nextBoard, depth, -Infinity, Infinity, true, isUnbeatable);
     } else {
       score = runMinimax(nextBoard, depth - 1, -Infinity, Infinity, false, isUnbeatable);
     }
@@ -379,7 +379,7 @@ function runMinimax(
       const { nextBoard, nextTurn } = executeMove(board, pit, 'player2');
       let score: number;
       if (nextTurn === 'player2') {
-        score = runMinimax(nextBoard, depth - 1, alpha, beta, true, isUnbeatable);
+        score = runMinimax(nextBoard, depth, alpha, beta, true, isUnbeatable);
       } else {
         score = runMinimax(nextBoard, depth - 1, alpha, beta, false, isUnbeatable);
       }
@@ -410,7 +410,7 @@ function runMinimax(
       const { nextBoard, nextTurn } = executeMove(board, pit, 'player1');
       let score: number;
       if (nextTurn === 'player1') {
-        score = runMinimax(nextBoard, depth - 1, alpha, beta, false, isUnbeatable);
+        score = runMinimax(nextBoard, depth, alpha, beta, false, isUnbeatable);
       } else {
         score = runMinimax(nextBoard, depth - 1, alpha, beta, true, isUnbeatable);
       }
@@ -640,27 +640,31 @@ export default function GameBoard({
   // 1. Sync Room State (Firebase or Local)
   useEffect(() => {
     if (gameMode === 'singleplayer') {
-      const savedDiff = localStorage.getItem('mangala_bot_difficulty') || 'medium';
-      const label = savedDiff === 'easy' ? 'Bilge Bot (Kolay 🟢)' : savedDiff === 'medium' ? 'Bilge Bot (Normal 🔵)' : savedDiff === 'hard' ? 'Bilge Bot (Zor ⚔️)' : 'Zorlu Bilge Bot (Zor+ 👑)';
-      const initialRoom: GameRoom = {
-        id: roomId,
-        player1Id: currUserId,
-        player1Name: currUserName,
-        player1Ready: true,
-        player2Id: 'bot',
-        player2Name: label,
-        player2Ready: true,
-        status: 'playing',
-        board: initBoard(),
-        turn: 'player1',
-        winnerId: null,
-        lastMove: null,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      setOfflineRoom(initialRoom);
-      setDisplayBoard(initialRoom.board);
-      setLoading(false);
+      setOfflineRoom((prev) => {
+        if (prev?.id === roomId) return prev; // Do not reset if already initialized!
+        
+        const savedDiff = localStorage.getItem('mangala_bot_difficulty') || 'medium';
+        const label = savedDiff === 'easy' ? 'Bilge Bot (Kolay 🟢)' : savedDiff === 'medium' ? 'Bilge Bot (Normal 🔵)' : savedDiff === 'hard' ? 'Bilge Bot (Zor ⚔️)' : 'Zorlu Bilge Bot (Zor+ 👑)';
+        const initialRoom: GameRoom = {
+          id: roomId,
+          player1Id: currUserId,
+          player1Name: currUserName,
+          player1Ready: true,
+          player2Id: 'bot',
+          player2Name: label,
+          player2Ready: true,
+          status: 'playing',
+          board: initBoard(),
+          turn: 'player1',
+          winnerId: null,
+          lastMove: null,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        setDisplayBoard(initialRoom.board);
+        setLoading(false);
+        return initialRoom;
+      });
     } else {
       const roomRef = doc(db, 'games', roomId);
       const unsubscribe = onSnapshot(roomRef, (snapshot) => {

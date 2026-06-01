@@ -1,0 +1,17 @@
+{
+  "name": "Bilge Taş - Mangala",
+  "short_name": "Mangala",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "description": "Klasik Mangala masa oyunu. Yapay zeka ile veya gerçek oyuncularla oyna.",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png"
+    }
+  ]
+}

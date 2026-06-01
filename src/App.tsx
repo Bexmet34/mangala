@@ -9,6 +9,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import AuthScreen from './components/AuthScreen';
 import Lobby from './components/Lobby';
 import GameBoard from './components/GameBoard';
+import InstallPrompt from './components/InstallPrompt';
 import { CircleDot, RefreshCw, BookOpen, Info, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -89,6 +90,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-slate-100 font-sans flex flex-col justify-between">
+      <InstallPrompt />
       {/* Dynamic Header */}
       <header className="bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-800/80 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
